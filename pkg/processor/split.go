@@ -4,10 +4,11 @@ import (
 	"fmt"
 	"image"
 	"image/draw"
-	"image/png"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"sprite-tools/pkg/common"
 )
 
 func isFrameEmpty(img image.Image, rect image.Rectangle) bool {
@@ -22,80 +23,57 @@ func isFrameEmpty(img image.Image, rect image.Rectangle) bool {
 	return true
 }
 
-func isAlreadySplit(img image.Image, size int) bool {
-	bounds := img.Bounds()
-	return bounds.Dx() == size && bounds.Dy() == size
-}
-
-func SplitFile(path string, size int) error {
-	file, err := os.Open(path)
+// SplitFile: 스프라이트 시트를 frameW x frameH 크기로 잘라 "<이름>-0001.png" 형태로 저장합니다.
+// outDir 가 비어 있으면 원본과 같은 폴더에 저장합니다. 완전히 투명한 프레임은 건너뜁니다.
+func SplitFile(path string, frameW, frameH int, outDir string, keepEmpty bool) (string, error) {
+	srcImg, err := common.LoadPNG(path)
 	if err != nil {
-		return err
+		return "", err
 	}
-	defer file.Close()
-
-	srcImg, err := png.Decode(file)
-	if err != nil {
-		return err
-	}
-
-	if isAlreadySplit(srcImg, size) {
-		fmt.Printf("건너뜀 (이미 분리된 이미지): %s\n", path)
-		return nil
-	}
-
 	bounds := srcImg.Bounds()
+
+	if bounds.Dx() == frameW && bounds.Dy() == frameH {
+		return "", common.Skip("이미 프레임 크기 %dx%d", frameW, frameH)
+	}
+	if bounds.Dx() < frameW || bounds.Dy() < frameH {
+		return "", common.Skip("이미지 %dx%d 가 프레임 %dx%d 보다 작음", bounds.Dx(), bounds.Dy(), frameW, frameH)
+	}
+
 	baseName := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
-	dir := filepath.Dir(path)
-	count := 1
+	if outDir == "" {
+		outDir = filepath.Dir(path)
+	} else if err := os.MkdirAll(outDir, 0755); err != nil {
+		return "", err
+	}
 
-	for y := bounds.Min.Y; y < bounds.Max.Y; y += size {
-		for x := bounds.Min.X; x < bounds.Max.X; x += size {
-			currRect := image.Rect(x, y, x+size, y+size)
-
-			if isFrameEmpty(srcImg, currRect) {
+	cols, rows := bounds.Dx()/frameW, bounds.Dy()/frameH
+	count, empty := 0, 0
+	for row := 0; row < rows; row++ {
+		for col := 0; col < cols; col++ {
+			origin := bounds.Min.Add(image.Pt(col*frameW, row*frameH))
+			rect := image.Rectangle{Min: origin, Max: origin.Add(image.Pt(frameW, frameH))}
+			if !keepEmpty && isFrameEmpty(srcImg, rect) {
+				empty++
 				continue
 			}
 
-			dstImg := image.NewRGBA(image.Rect(0, 0, size, size))
-			draw.Draw(dstImg, dstImg.Bounds(), srcImg, currRect.Min, draw.Src)
+			dst := image.NewNRGBA(image.Rect(0, 0, frameW, frameH))
+			draw.Draw(dst, dst.Bounds(), srcImg, rect.Min, draw.Src)
 
-			outFileName := fmt.Sprintf("%s-%04d.png", baseName, count)
-			outPath := filepath.Join(dir, outFileName)
-
-			outFile, err := os.Create(outPath)
-			if err != nil {
-				return err
-			}
-
-			if err := png.Encode(outFile, dstImg); err != nil {
-				outFile.Close()
-				return err
-			}
-			outFile.Close()
-
-			fmt.Printf("✓ 생성됨: %s\n", outPath)
 			count++
+			outPath := filepath.Join(outDir, fmt.Sprintf("%s-%04d.png", baseName, count))
+			if err := common.SavePNG(outPath, dst); err != nil {
+				return "", err
+			}
 		}
 	}
 
-	return nil
-}
-
-func SplitAll(pattern string, size int) {
-	filepath.Walk(".", func(path string, info os.FileInfo, err error) error {
-		if err != nil || info.IsDir() {
-			return nil
-		}
-
-		matched, _ := filepath.Match(pattern, filepath.Base(path))
-		if !matched {
-			return nil
-		}
-
-		if err := SplitFile(path, size); err != nil {
-			fmt.Printf("오류 발생 (%s): %v\n", path, err)
-		}
-		return nil
-	})
+	msg := fmt.Sprintf("%d프레임 생성, %dx%d 격자", count, cols, rows)
+	if empty > 0 {
+		msg += fmt.Sprintf(", 빈 프레임 %d개 제외", empty)
+	}
+	if bounds.Dx()%frameW != 0 || bounds.Dy()%frameH != 0 {
+		msg += fmt.Sprintf(", 경고: 가장자리 %dx%dpx 잘림", bounds.Dx()%frameW, bounds.Dy()%frameH)
+	}
+	return msg, nil
 }

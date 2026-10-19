@@ -40,9 +40,16 @@ func RGBToOKLab(r, g, b uint32) OKLab {
 }
 
 // ColorToOKLab: image/color.Color 인터페이스를 직접 받아 OKLab으로 변환합니다.
+// 반투명 색상이 어둡게 계산되지 않도록 알파를 제외한(non-premultiplied) RGB 값을 사용합니다.
 func ColorToOKLab(c color.Color) OKLab {
-	r, g, b, _ := c.RGBA()
-	return RGBToOKLab(r, g, b)
+	n := color.NRGBAModel.Convert(c).(color.NRGBA)
+	return RGBToOKLab(uint32(n.R)<<8, uint32(n.G)<<8, uint32(n.B)<<8)
+}
+
+// Alpha8: 색상의 알파 값을 0~255 범위로 반환합니다.
+func Alpha8(c color.Color) uint8 {
+	_, _, _, a := c.RGBA()
+	return uint8(a >> 8)
 }
 
 // Chroma: OKLab 상에서 색상의 채도(원점으로부터의 거리)를 계산합니다.

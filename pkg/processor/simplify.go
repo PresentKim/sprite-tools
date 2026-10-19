@@ -4,105 +4,98 @@ import (
 	"fmt"
 	"image"
 	"image/color"
-	"image/png"
-	"os"
-	"path/filepath"
+	"slices"
 
 	"sprite-tools/pkg/common"
 )
 
-func Simplify(inputPath, outputPath string, threshold float64) error {
-	file, err := os.Open(inputPath)
+// Simplify: 비슷한 색상(OKLab 가중 거리 < threshold)을 하나의 대표 색상으로 합칩니다.
+// 많이 쓰인 색상부터 대표로 선택하므로 결과가 픽셀 순서에 좌우되지 않습니다.
+func Simplify(inputPath, outputPath string, threshold float64) (string, error) {
+	src, err := common.LoadPNG(inputPath)
 	if err != nil {
-		fmt.Printf("[ERROR] Failed to open %s: %v\n", inputPath, err)
-		return err
+		return "", err
 	}
-	defer file.Close()
-
-	src, err := png.Decode(file)
-	if err != nil {
-		fmt.Printf("[ERROR] Failed to decode %s: %v\n", inputPath, err)
-		return err
-	}
-
 	bounds := src.Bounds()
-	dst := image.NewRGBA(bounds)
 
-	originalColors := make(map[color.Color]bool)
-	colorCache := make(map[color.Color]color.Color)
-
-	type repColor struct {
-		oklab common.OKLab
-		raw   color.Color
+	type entry struct {
+		c            color.Color
+		count, first int
 	}
-	var representatives []repColor
+	index := make(map[color.Color]int)
+	var entries []entry
+	hasTransparent := false
 
 	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
 		for x := bounds.Min.X; x < bounds.Max.X; x++ {
 			c := src.At(x, y)
-			originalColors[c] = true
-
-			_, _, _, a := c.RGBA()
-			if a == 0 {
-				dst.Set(x, y, color.Transparent)
+			if common.Alpha8(c) == 0 {
+				hasTransparent = true
 				continue
 			}
-
-			if mappedColor, ok := colorCache[c]; ok {
-				dst.Set(x, y, mappedColor)
-				continue
-			}
-
-			currOKLab := common.ColorToOKLab(c)
-			found := false
-
-			for _, rep := range representatives {
-				if common.DeltaOKLabWeighted(currOKLab, rep.oklab) < threshold {
-					dst.Set(x, y, rep.raw)
-					colorCache[c] = rep.raw
-					found = true
-					break
-				}
-			}
-
-			if !found {
-				representatives = append(representatives, repColor{currOKLab, c})
-				dst.Set(x, y, c)
-				colorCache[c] = c
+			if i, ok := index[c]; ok {
+				entries[i].count++
+			} else {
+				index[c] = len(entries)
+				entries = append(entries, entry{c, 1, len(entries)})
 			}
 		}
 	}
 
-	out, err := os.Create(outputPath)
-	if err != nil {
-		return err
+	order := make([]int, len(entries))
+	for i := range order {
+		order[i] = i
 	}
-	defer out.Close()
+	slices.SortStableFunc(order, func(a, b int) int {
+		return entries[b].count - entries[a].count
+	})
 
-	if err := png.Encode(out, dst); err != nil {
-		return err
+	type rep struct {
+		oklab common.OKLab
+		raw   color.Color
 	}
+	var reps []rep
+	mapping := make(map[color.Color]color.Color, len(entries))
 
-	origCount := len(originalColors)
-	finalCount := len(representatives)
-
-	hasTransparent := false
-	for c := range originalColors {
-		_, _, _, a := c.RGBA()
-		if a == 0 {
-			hasTransparent = true
-			break
+	for _, i := range order {
+		c := entries[i].c
+		lab := common.ColorToOKLab(c)
+		matched := false
+		for _, r := range reps {
+			if common.DeltaOKLabWeighted(lab, r.oklab) < threshold {
+				mapping[c] = r.raw
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			reps = append(reps, rep{lab, c})
+			mapping[c] = c
 		}
 	}
+
+	origCount, finalCount := len(entries), len(reps)
 	if hasTransparent {
+		origCount++
 		finalCount++
 	}
-
 	if origCount == finalCount {
-		fmt.Printf("[SKIP] No color count change for %s (Colors: %d)\n", filepath.Base(inputPath), origCount)
-	} else {
-		fmt.Printf("[DONE] %s: %d -> %d colors\n", filepath.Base(inputPath), origCount, finalCount)
+		return "", common.Skip("합칠 색상 없음, 색상 %d개", origCount)
 	}
 
-	return nil
+	dst := image.NewNRGBA(bounds)
+	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+		for x := bounds.Min.X; x < bounds.Max.X; x++ {
+			c := src.At(x, y)
+			if common.Alpha8(c) == 0 {
+				continue
+			}
+			dst.Set(x, y, mapping[c])
+		}
+	}
+
+	if err := common.SavePNG(outputPath, dst); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("색상 %d → %d", origCount, finalCount), nil
 }

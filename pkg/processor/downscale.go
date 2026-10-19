@@ -3,8 +3,8 @@ package processor
 import (
 	"fmt"
 	"image"
-	"image/png"
-	"os"
+
+	"sprite-tools/pkg/common"
 )
 
 func gcd(a, b int) int {
@@ -14,10 +14,14 @@ func gcd(a, b int) int {
 	return a
 }
 
+// detectScale: 같은 색이 연속되는 구간 길이들의 최대공약수로 픽셀 확대 배율을 추정합니다.
 func detectScale(img image.Image) int {
 	bounds := img.Bounds()
 	width, height := bounds.Dx(), bounds.Dy()
-	scale := width
+	scale := gcd(width, height)
+	if scale <= 1 {
+		return 1
+	}
 
 	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
 		currentLen := 1
@@ -51,50 +55,37 @@ func detectScale(img image.Image) int {
 		}
 	}
 
-	scale = gcd(scale, width)
-	scale = gcd(scale, height)
-
 	return scale
 }
 
-func Downscale(inputPath, outputPath string) error {
-	file, err := os.Open(inputPath)
+// Downscale: 확대된 픽셀 아트를 1:1 크기로 줄입니다. forceScale > 0 이면 자동 감지 대신 해당 배율을 사용합니다.
+func Downscale(inputPath, outputPath string, forceScale int) (string, error) {
+	src, err := common.LoadPNG(inputPath)
 	if err != nil {
-		return err
+		return "", err
 	}
-	defer file.Close()
-
-	src, err := png.Decode(file)
-	if err != nil {
-		return err
-	}
-
-	scale := detectScale(src)
-	if scale <= 1 {
-		return fmt.Errorf("already 1:1 scale or unable to detect")
-	}
-
 	bounds := src.Bounds()
-	newW, newH := bounds.Dx()/scale, bounds.Dy()/scale
-	dst := image.NewRGBA(image.Rect(0, 0, newW, newH))
 
+	scale := forceScale
+	if scale <= 0 {
+		scale = detectScale(src)
+		if scale <= 1 {
+			return "", common.Skip("이미 1:1 크기이거나 배율을 감지할 수 없음, %dx%d", bounds.Dx(), bounds.Dy())
+		}
+	} else if bounds.Dx()%scale != 0 || bounds.Dy()%scale != 0 {
+		return "", fmt.Errorf("이미지 크기 %dx%d 가 배율 %d 로 나누어떨어지지 않습니다", bounds.Dx(), bounds.Dy(), scale)
+	}
+
+	newW, newH := bounds.Dx()/scale, bounds.Dy()/scale
+	dst := image.NewNRGBA(image.Rect(0, 0, newW, newH))
 	for y := 0; y < newH; y++ {
 		for x := 0; x < newW; x++ {
 			dst.Set(x, y, src.At(bounds.Min.X+x*scale, bounds.Min.Y+y*scale))
 		}
 	}
 
-	out, err := os.Create(outputPath)
-	if err != nil {
-		return err
+	if err := common.SavePNG(outputPath, dst); err != nil {
+		return "", err
 	}
-	defer out.Close()
-
-	if err := png.Encode(out, dst); err != nil {
-		return err
-	}
-
-	fi, _ := os.Stat(outputPath)
-	fmt.Printf("[DOWNSCALED] %d bytes (Detected: %dx, Target: %dx%d): %s -> %s\n", fi.Size(), scale, newW, newH, inputPath, outputPath)
-	return nil
+	return fmt.Sprintf("%d배 축소, %dx%d → %dx%d", scale, bounds.Dx(), bounds.Dy(), newW, newH), nil
 }
