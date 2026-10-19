@@ -4,17 +4,16 @@ import (
 	"fmt"
 	"image"
 	"image/color"
-
-	"sprite-tools/pkg/common"
 )
 
-// Index: 이미지를 인덱스(팔레트) PNG로 변환하고 0번 색상을 투명(#ffffff00)으로 고정합니다.
-// 색상 순서는 이미지에 처음 등장한 순서를 따르므로 실행할 때마다 같은 결과가 나옵니다.
+// Index: 파일 단위 IndexImage.
 func Index(inputPath, outputPath string) (string, error) {
-	src, err := common.LoadPNG(inputPath)
-	if err != nil {
-		return "", err
-	}
+	return convertFile(inputPath, outputPath, IndexImage)
+}
+
+// IndexImage: 이미지를 인덱스(팔레트) 이미지로 변환하고 0번 색상을 투명(#ffffff00)으로 고정합니다.
+// 색상 순서는 이미지에 처음 등장한 순서를 따르므로 실행할 때마다 같은 결과가 나옵니다.
+func IndexImage(src image.Image) (image.Image, string, error) {
 	bounds := src.Bounds()
 
 	transparent := color.NRGBA{255, 255, 255, 0}
@@ -31,7 +30,7 @@ func Index(inputPath, outputPath string) (string, error) {
 			i, ok := index[c]
 			if !ok {
 				if len(pal) >= 256 {
-					return "", fmt.Errorf("색상이 255개를 넘어 팔레트로 만들 수 없습니다. 먼저 reduce 나 recolor 로 색상을 줄이세요")
+					return nil, "", fmt.Errorf("색상이 255개를 넘어 팔레트로 만들 수 없습니다. 먼저 reduce 나 recolor 로 색상을 줄이세요")
 				}
 				i = uint8(len(pal))
 				index[c] = i
@@ -41,9 +40,5 @@ func Index(inputPath, outputPath string) (string, error) {
 		}
 	}
 	dst.Palette = pal
-
-	if err := common.SavePNG(outputPath, dst); err != nil {
-		return "", err
-	}
-	return fmt.Sprintf("팔레트 %d색, 0번 투명", len(pal)), nil
+	return dst, fmt.Sprintf("팔레트 %d색, 0번 투명", len(pal)), nil
 }

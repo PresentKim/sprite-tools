@@ -1,11 +1,30 @@
 # sprite-tools
 
-픽셀 아트 PNG를 일괄 처리하는 명령줄 도구입니다.
+픽셀 아트 PNG를 일괄 처리하는 도구입니다. 명령줄(CLI)과 GUI 두 가지로 쓸 수 있으며, 둘은 같은 처리 코드를 공유합니다.
 
 ```
 go build -o sprite-tools.exe .
 sprite-tools help
 ```
+
+## GUI
+
+`gui/` 폴더에 [Wails](https://wails.io) 기반 데스크톱 앱이 있습니다.
+
+```
+cd gui
+wails build        # → gui/build/bin/sprite-tools-gui.exe
+wails dev          # 개발 모드 (화면 수정 시 자동 갱신)
+```
+
+- PNG 파일이나 폴더를 창에 끌어다 놓아 추가 (하위 폴더 포함 여부 선택)
+- 원본/결과 미리보기: 옵션을 바꾸면 바로 갱신되며, 픽셀이 뭉개지지 않게 정수 배율로 확대
+- 결과 색상 견본, 팔레트 견본, Lospec 팔레트 불러오기
+- 진행률 표시, 취소(Esc), 결과 폴더 열기
+- 단축키: `Ctrl+Enter` 실행, `Alt+1~5` 명령 전환, `↑/↓` 파일 이동, `Delete` 목록에서 제거
+- 설정은 다음 실행 때도 유지됩니다
+
+빌드에는 Go, Node.js, Wails CLI(`go install github.com/wailsapp/wails/v2/cmd/wails@latest`)가 필요하며, 실행에는 WebView2(Windows 10/11 기본 포함)가 필요합니다.
 
 ## 명령
 

@@ -58,22 +58,25 @@ func detectScale(img image.Image) int {
 	return scale
 }
 
-// Downscale: 확대된 픽셀 아트를 1:1 크기로 줄입니다. forceScale > 0 이면 자동 감지 대신 해당 배율을 사용합니다.
+// Downscale: 파일 단위 DownscaleImage.
 func Downscale(inputPath, outputPath string, forceScale int) (string, error) {
-	src, err := common.LoadPNG(inputPath)
-	if err != nil {
-		return "", err
-	}
+	return convertFile(inputPath, outputPath, func(src image.Image) (image.Image, string, error) {
+		return DownscaleImage(src, forceScale)
+	})
+}
+
+// DownscaleImage: 확대된 픽셀 아트를 1:1 크기로 줄입니다. forceScale > 0 이면 자동 감지 대신 해당 배율을 사용합니다.
+func DownscaleImage(src image.Image, forceScale int) (image.Image, string, error) {
 	bounds := src.Bounds()
 
 	scale := forceScale
 	if scale <= 0 {
 		scale = detectScale(src)
 		if scale <= 1 {
-			return "", common.Skip("이미 1:1 크기이거나 배율을 감지할 수 없음, %dx%d", bounds.Dx(), bounds.Dy())
+			return nil, "", common.Skip("이미 1:1 크기이거나 배율을 감지할 수 없음, %dx%d", bounds.Dx(), bounds.Dy())
 		}
 	} else if bounds.Dx()%scale != 0 || bounds.Dy()%scale != 0 {
-		return "", fmt.Errorf("이미지 크기 %dx%d 가 배율 %d 로 나누어떨어지지 않습니다", bounds.Dx(), bounds.Dy(), scale)
+		return nil, "", fmt.Errorf("이미지 크기 %dx%d 가 배율 %d 로 나누어떨어지지 않습니다", bounds.Dx(), bounds.Dy(), scale)
 	}
 
 	newW, newH := bounds.Dx()/scale, bounds.Dy()/scale
@@ -84,8 +87,5 @@ func Downscale(inputPath, outputPath string, forceScale int) (string, error) {
 		}
 	}
 
-	if err := common.SavePNG(outputPath, dst); err != nil {
-		return "", err
-	}
-	return fmt.Sprintf("%d배 축소, %dx%d → %dx%d", scale, bounds.Dx(), bounds.Dy(), newW, newH), nil
+	return dst, fmt.Sprintf("%d배 축소, %dx%d → %dx%d", scale, bounds.Dx(), bounds.Dy(), newW, newH), nil
 }

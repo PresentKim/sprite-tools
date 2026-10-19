@@ -1,10 +1,13 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -61,7 +64,7 @@ func init() {
   sprite-tools ix sprites -r`, runIndex},
 		{"recolor", []string{"rc"}, []string{"palette-convert"}, "Lospec 팔레트(또는 PNG 팔레트)의 색으로 바꿉니다", "-p <팔레트> [경로...] [옵션]",
 			`-p 에는 Lospec 팔레트 이름(예: otterisk-96) 또는 팔레트 PNG 파일 경로를 줍니다.
-다운로드한 팔레트는 실행 파일 옆 palettes 폴더에 저장되어 다음부터 오프라인으로 사용됩니다.
+받은 팔레트는 사용자 폴더(%APPDATA%\sprite-tools\palettes)에 저장되어 GUI와 함께 오프라인으로 쓸 수 있습니다.
 
 예시:
   sprite-tools recolor -p otterisk-96
@@ -231,7 +234,6 @@ func (b *batchFlags) options(roots []string) common.Options {
 		Pattern:   *b.pattern,
 		Recursive: *b.recursive,
 		Threads:   *b.threads,
-		DryRun:    *b.dryRun,
 		NoOutput:  b.suffix == nil,
 	}
 	if b.suffix != nil {
@@ -239,9 +241,7 @@ func (b *batchFlags) options(roots []string) common.Options {
 		o.InPlace = *b.inPlace
 	}
 	// 캐시된 팔레트 이미지가 작업 대상에 섞이지 않도록 제외합니다.
-	if dir, err := processor.GetPalettesDir(); err == nil {
-		o.ExcludeDirs = append(o.ExcludeDirs, dir)
-	}
+	o.ExcludeDirs = append(o.ExcludeDirs, processor.PaletteDirs()...)
 	return o
 }
 
@@ -272,12 +272,62 @@ func parseOrExit(fs *flag.FlagSet, args []string) ([]string, int, bool) {
 	return roots, 0, true
 }
 
-func execute(o common.Options, task common.Task) int {
-	sum, err := common.Run(o, task)
+func execute(b *batchFlags, roots []string, task common.Task) int {
+	o := b.options(roots)
+	if err := o.Validate(); err != nil {
+		fmt.Fprintf(os.Stderr, "오류: %v\n", err)
+		return exitUsage
+	}
+	files, err := common.CollectFiles(o)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "오류: %v\n", err)
 		return exitUsage
 	}
+	if len(files) == 0 {
+		fmt.Printf("처리할 파일이 없습니다 (패턴: %s)\n", o.Pattern)
+		return exitOK
+	}
+
+	if *b.dryRun {
+		fmt.Printf("[미리보기] %d개 파일이 처리됩니다. 실제로는 아무것도 쓰지 않습니다.\n", len(files))
+		for _, f := range files {
+			switch out := o.OutputPath(f); out {
+			case "":
+				fmt.Printf("  %s\n", f)
+			case f:
+				fmt.Printf("  %s (덮어쓰기)\n", f)
+			default:
+				fmt.Printf("  %s -> %s\n", f, out)
+			}
+		}
+		return exitOK
+	}
+
+	threads := o.Threads
+	if threads <= 0 {
+		threads = runtime.NumCPU()
+	}
+	fmt.Printf("%d개 파일 처리 시작 (스레드 %d개)\n", len(files), min(threads, len(files)))
+
+	labels := map[common.Status]string{
+		common.StatusDone:    "완료  ",
+		common.StatusSkipped: "건너뜀",
+		common.StatusFailed:  "실패  ",
+	}
+	width := len(fmt.Sprint(len(files)))
+	sum := common.RunFiles(context.Background(), files, o, task, func(r common.Result) {
+		target := r.Input
+		if r.Output != "" && r.Output != r.Input {
+			target += " -> " + filepath.Base(r.Output)
+		}
+		msg := ""
+		if r.Message != "" {
+			msg = "  (" + r.Message + ")"
+		}
+		fmt.Printf("[%*d/%d] %s %s%s\n", width, r.Completed, r.Total, labels[r.Status], target, msg)
+	})
+
+	fmt.Printf("\n완료 %d · 건너뜀 %d · 실패 %d  (%.1fs)\n", sum.Done, sum.Skipped, sum.Failed, sum.Elapsed.Seconds())
 	if sum.Failed > 0 {
 		return exitFailed
 	}
@@ -301,7 +351,7 @@ func runReduce(args []string) int {
 	if *threshold <= 0 {
 		return usageError(fs, "-t 는 0보다 커야 합니다")
 	}
-	return execute(b.options(roots), func(in, out string) (string, error) {
+	return execute(b, roots, func(in, out string) (string, error) {
 		return processor.Reduce(in, out, *threshold)
 	})
 }
@@ -317,7 +367,7 @@ func runDownscale(args []string) int {
 	if *scale < 0 || *scale == 1 {
 		return usageError(fs, "-scale 은 2 이상이거나 0(자동)이어야 합니다")
 	}
-	return execute(b.options(roots), func(in, out string) (string, error) {
+	return execute(b, roots, func(in, out string) (string, error) {
 		return processor.Downscale(in, out, *scale)
 	})
 }
@@ -329,7 +379,7 @@ func runIndex(args []string) int {
 	if !ok {
 		return code
 	}
-	return execute(b.options(roots), processor.Index)
+	return execute(b, roots, processor.Index)
 }
 
 // parseSize: "16" 또는 "16x24" 형식의 프레임 크기를 해석합니다.
@@ -368,7 +418,7 @@ func runSlice(args []string) int {
 	if err != nil {
 		return usageError(fs, "-size '%s': %v", *size, err)
 	}
-	return execute(b.options(roots), func(in, _ string) (string, error) {
+	return execute(b, roots, func(in, _ string) (string, error) {
 		return processor.SliceFile(in, w, h, *outDir, *keepEmpty)
 	})
 }
@@ -389,8 +439,7 @@ func runRecolor(args []string) int {
 			fmt.Fprintf(os.Stderr, "팔레트 목록 조회 실패: %v\n", err)
 			return exitFailed
 		}
-		dir, _ := processor.GetPalettesDir()
-		fmt.Printf("로컬 팔레트 (%s)\n", dir)
+		fmt.Printf("로컬 팔레트 (%s)\n", strings.Join(processor.PaletteDirs(), ", "))
 		if len(palettes) == 0 {
 			fmt.Println("  (없음) -p <이름> 으로 처음 사용할 때 자동으로 다운로드됩니다.")
 		}
@@ -416,7 +465,7 @@ func runRecolor(args []string) int {
 	}
 	fmt.Printf("팔레트 %s (%d색)\n", palettePath, len(rawColors))
 
-	return execute(b.options(roots), func(in, out string) (string, error) {
+	return execute(b, roots, func(in, out string) (string, error) {
 		return processor.Recolor(in, out, rawColors, labColors)
 	})
 }

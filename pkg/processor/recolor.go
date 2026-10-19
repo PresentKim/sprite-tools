@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -20,17 +21,32 @@ import (
 
 var paletteNamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 
-// GetPalettesDir: 실행 파일(바이너리)이 있는 디렉터리 내 palettes 경로를 반환합니다.
+// GetPalettesDir: 팔레트를 내려받아 저장하는 공용 폴더(%APPDATA%\sprite-tools\palettes 등)를 반환합니다.
+// CLI 와 GUI 가 같은 폴더를 공유합니다.
 func GetPalettesDir() (string, error) {
-	execPath, err := os.Executable()
+	base, err := os.UserConfigDir()
 	if err != nil {
-		return "", fmt.Errorf("실행 파일 경로를 가져올 수 없습니다: %v", err)
+		return "", fmt.Errorf("사용자 설정 폴더를 찾을 수 없습니다: %v", err)
 	}
-	execDir := filepath.Dir(execPath)
-	return filepath.Join(execDir, "palettes"), nil
+	return filepath.Join(base, "sprite-tools", "palettes"), nil
 }
 
-// EnsurePalettesDirExists: 실행 파일 위치에 palettes 디렉터리가 없으면 생성합니다.
+// PaletteDirs: 팔레트를 찾는 폴더 목록입니다. 실행 파일 옆 palettes 폴더(휴대용 구성)가 있으면 먼저 찾습니다.
+func PaletteDirs() []string {
+	var dirs []string
+	if exe, err := os.Executable(); err == nil {
+		local := filepath.Join(filepath.Dir(exe), "palettes")
+		if st, err := os.Stat(local); err == nil && st.IsDir() {
+			dirs = append(dirs, local)
+		}
+	}
+	if dir, err := GetPalettesDir(); err == nil {
+		dirs = append(dirs, dir)
+	}
+	return dirs
+}
+
+// EnsurePalettesDirExists: 공용 팔레트 폴더가 없으면 생성합니다.
 func EnsurePalettesDirExists() (string, error) {
 	dir, err := GetPalettesDir()
 	if err != nil {
@@ -55,7 +71,7 @@ func ResolvePalette(spec string) (string, error) {
 	return DownloadPalette(spec)
 }
 
-// DownloadPalette: Lospec에서 팔레트 1x PNG 이미지를 실행 파일 위치의 palettes 폴더에 저장합니다.
+// DownloadPalette: 캐시에 없으면 Lospec에서 팔레트 1x PNG 이미지를 내려받아 공용 팔레트 폴더에 저장합니다.
 func DownloadPalette(name string) (string, error) {
 	cleanName := strings.ToLower(strings.TrimSpace(name))
 	if !paletteNamePattern.MatchString(cleanName) {
@@ -106,26 +122,30 @@ func DownloadPalette(name string) (string, error) {
 	return savePath, nil
 }
 
-// ListLocalPalettes: 실행 파일 위치의 palettes 디렉터리에 저장된 팔레트 목록을 반환합니다.
+// ListLocalPalettes: 저장된 팔레트 이름 목록을 반환합니다 (중복 제거, 이름순).
 func ListLocalPalettes() ([]string, error) {
-	palettesDir, err := GetPalettesDir()
-	if err != nil {
-		return nil, err
-	}
-	files, err := os.ReadDir(palettesDir)
-	if os.IsNotExist(err) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-
+	seen := make(map[string]bool)
 	var palettes []string
-	for _, file := range files {
-		if !file.IsDir() && strings.EqualFold(filepath.Ext(file.Name()), ".png") {
-			palettes = append(palettes, strings.TrimSuffix(file.Name(), filepath.Ext(file.Name())))
+	for _, dir := range PaletteDirs() {
+		files, err := os.ReadDir(dir)
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		for _, file := range files {
+			if file.IsDir() || !strings.EqualFold(filepath.Ext(file.Name()), ".png") {
+				continue
+			}
+			name := strings.ToLower(strings.TrimSuffix(file.Name(), filepath.Ext(file.Name())))
+			if !seen[name] {
+				seen[name] = true
+				palettes = append(palettes, name)
+			}
 		}
 	}
+	slices.Sort(palettes)
 	return palettes, nil
 }
 
@@ -159,14 +179,16 @@ func LoadPaletteColors(palettePath string) ([]color.NRGBA, []common.OKLab, error
 	return rawColors, oklabColors, nil
 }
 
-// Recolor: 입력 이미지의 색상을 OKLab 거리 기준 가장 가까운 팔레트 색상으로 변환합니다.
-// 원본 픽셀의 알파 값은 그대로 유지합니다.
+// Recolor: 파일 단위 RecolorImage.
 func Recolor(inputPath, outputPath string, paletteColors []color.NRGBA, paletteOKLabs []common.OKLab) (string, error) {
-	src, err := common.LoadPNG(inputPath)
-	if err != nil {
-		return "", err
-	}
+	return convertFile(inputPath, outputPath, func(src image.Image) (image.Image, string, error) {
+		return RecolorImage(src, paletteColors, paletteOKLabs)
+	})
+}
 
+// RecolorImage: 입력 이미지의 색상을 OKLab 거리 기준 가장 가까운 팔레트 색상으로 변환합니다.
+// 원본 픽셀의 알파 값은 그대로 유지합니다.
+func RecolorImage(src image.Image, paletteColors []color.NRGBA, paletteOKLabs []common.OKLab) (image.Image, string, error) {
 	bounds := src.Bounds()
 	dst := image.NewNRGBA(bounds)
 	colorCache := make(map[color.Color]color.NRGBA)
@@ -202,8 +224,5 @@ func Recolor(inputPath, outputPath string, paletteColors []color.NRGBA, paletteO
 		}
 	}
 
-	if err := common.SavePNG(outputPath, dst); err != nil {
-		return "", err
-	}
-	return fmt.Sprintf("원본 색상 %d개 중 %d개 교체", len(colorCache), changed), nil
+	return dst, fmt.Sprintf("원본 색상 %d개 중 %d개 교체", len(colorCache), changed), nil
 }

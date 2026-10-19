@@ -11,3 +11,6 @@ sprite-tools
 *-downscaled.png
 *-indexed.png
 *-recolored.png
+
+# Local tool config
+.claude/

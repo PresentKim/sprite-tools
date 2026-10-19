@@ -1,6 +1,7 @@
 package common
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -39,12 +40,34 @@ type Options struct {
 	InPlace     bool     // 원본 파일을 직접 덮어씀
 	NoOutput    bool     // 작업이 출력 경로를 직접 결정함 (slice 등)
 	Threads     int
-	DryRun      bool
 	ExcludeDirs []string // 탐색에서 제외할 디렉터리
 }
 
+type Status string
+
+const (
+	StatusDone    Status = "done"
+	StatusSkipped Status = "skipped"
+	StatusFailed  Status = "failed"
+)
+
+// Result: 파일 하나의 처리 결과입니다.
+type Result struct {
+	Index     int    `json:"index"`     // 입력 목록에서의 위치
+	Completed int    `json:"completed"` // 지금까지 끝난 파일 수
+	Total     int    `json:"total"`
+	Input     string `json:"input"`
+	Output    string `json:"output"`
+	Status    Status `json:"status"`
+	Message   string `json:"message"`
+}
+
 type Summary struct {
-	Done, Skipped, Failed int
+	Done     int           `json:"done"`
+	Skipped  int           `json:"skipped"`
+	Failed   int           `json:"failed"`
+	Canceled bool          `json:"canceled"`
+	Elapsed  time.Duration `json:"elapsed"`
 }
 
 // OutputPath: 옵션에 따른 출력 경로를 계산합니다.
@@ -57,6 +80,14 @@ func (o Options) OutputPath(in string) string {
 	}
 	ext := filepath.Ext(in)
 	return strings.TrimSuffix(in, ext) + o.Suffix + ext
+}
+
+// Validate: 출력 설정이 올바른지 확인합니다.
+func (o Options) Validate() error {
+	if !o.InPlace && !o.NoOutput && o.Suffix == "" {
+		return errors.New("출력 접미사가 비어 있습니다. 원본을 덮어쓰려면 덮어쓰기(-w)를 사용하세요")
+	}
+	return nil
 }
 
 func (o Options) isOwnOutput(path string) bool {
@@ -151,50 +182,21 @@ func CollectFiles(o Options) ([]string, error) {
 	return files, nil
 }
 
-// Run: 입력 파일을 수집해 병렬로 처리하고 진행 상황과 요약을 출력합니다.
-func Run(o Options, task Task) (Summary, error) {
+// RunFiles: 주어진 파일들을 병렬로 처리합니다. report 는 파일 하나가 끝날 때마다 (순서대로 하나씩) 호출됩니다.
+// ctx 가 취소되면 아직 시작하지 않은 파일은 처리하지 않습니다.
+func RunFiles(ctx context.Context, files []string, o Options, task Task, report func(Result)) Summary {
 	var sum Summary
-	if !o.InPlace && !o.NoOutput && o.Suffix == "" {
-		return sum, errors.New("출력 접미사(-s)가 비어 있습니다. 원본을 덮어쓰려면 -w 를 사용하세요")
-	}
-
-	files, err := CollectFiles(o)
-	if err != nil {
-		return sum, err
-	}
-	if len(files) == 0 {
-		fmt.Printf("처리할 파일이 없습니다 (패턴: %s)\n", o.Pattern)
-		return sum, nil
-	}
-
-	if o.DryRun {
-		fmt.Printf("[미리보기] %d개 파일이 처리됩니다. 실제로는 아무것도 쓰지 않습니다.\n", len(files))
-		for _, f := range files {
-			if out := o.OutputPath(f); out != "" && out != f {
-				fmt.Printf("  %s -> %s\n", f, out)
-			} else if out == f {
-				fmt.Printf("  %s (덮어쓰기)\n", f)
-			} else {
-				fmt.Printf("  %s\n", f)
-			}
-		}
-		return sum, nil
-	}
+	start := time.Now()
 
 	threads := o.Threads
 	if threads <= 0 {
 		threads = runtime.NumCPU()
 	}
-	threads = min(threads, len(files))
-
-	start := time.Now()
-	fmt.Printf("%d개 파일 처리 시작 (스레드 %d개)\n", len(files), threads)
+	threads = max(1, min(threads, len(files)))
 
 	jobs := make(chan int)
 	var mu sync.Mutex
 	var wg sync.WaitGroup
-	completed := 0
-	width := len(fmt.Sprint(len(files)))
 
 	for w := 0; w < threads; w++ {
 		wg.Add(1)
@@ -205,43 +207,50 @@ func Run(o Options, task Task) (Summary, error) {
 				out := o.OutputPath(in)
 				msg, err := runTask(task, in, out)
 
-				mu.Lock()
-				completed++
-				var label string
+				r := Result{Index: i, Total: len(files), Input: in, Output: out, Message: msg}
 				switch {
 				case err == nil:
-					sum.Done++
-					label = "완료  "
+					r.Status = StatusDone
 				case IsSkip(err):
+					r.Status = StatusSkipped
+					r.Message = err.Error()
+				default:
+					r.Status = StatusFailed
+					r.Message = err.Error()
+				}
+
+				mu.Lock()
+				switch r.Status {
+				case StatusDone:
+					sum.Done++
+				case StatusSkipped:
 					sum.Skipped++
-					label = "건너뜀"
-					msg = err.Error()
 				default:
 					sum.Failed++
-					label = "실패  "
-					msg = err.Error()
 				}
-				target := in
-				if out != "" && out != in {
-					target = in + " -> " + filepath.Base(out)
+				r.Completed = sum.Done + sum.Skipped + sum.Failed
+				if report != nil {
+					report(r)
 				}
-				if msg != "" {
-					msg = "  (" + msg + ")"
-				}
-				fmt.Printf("[%*d/%d] %s %s%s\n", width, completed, len(files), label, target, msg)
 				mu.Unlock()
 			}
 		}()
 	}
 
+feed:
 	for i := range files {
-		jobs <- i
+		select {
+		case <-ctx.Done():
+			sum.Canceled = true
+			break feed
+		case jobs <- i:
+		}
 	}
 	close(jobs)
 	wg.Wait()
 
-	fmt.Printf("\n완료 %d · 건너뜀 %d · 실패 %d  (%.1fs)\n", sum.Done, sum.Skipped, sum.Failed, time.Since(start).Seconds())
-	return sum, nil
+	sum.Elapsed = time.Since(start)
+	return sum
 }
 
 // runTask: 작업 중 panic 이 발생해도 전체 실행이 중단되지 않도록 보호합니다.
