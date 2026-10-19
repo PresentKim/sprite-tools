@@ -37,7 +37,7 @@ type Options struct {
 	Recursive   bool     // 하위 디렉터리까지 탐색
 	Suffix      string   // 출력 파일 접미사 (InPlace 가 아닐 때)
 	InPlace     bool     // 원본 파일을 직접 덮어씀
-	NoOutput    bool     // 작업이 출력 경로를 직접 결정함 (split 등)
+	NoOutput    bool     // 작업이 출력 경로를 직접 결정함 (slice 등)
 	Threads     int
 	DryRun      bool
 	ExcludeDirs []string // 탐색에서 제외할 디렉터리

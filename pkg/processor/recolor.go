@@ -159,9 +159,9 @@ func LoadPaletteColors(palettePath string) ([]color.NRGBA, []common.OKLab, error
 	return rawColors, oklabColors, nil
 }
 
-// ConvertToPalette: 입력 이미지의 색상을 OKLab 거리 기준 가장 가까운 팔레트 색상으로 변환합니다.
+// Recolor: 입력 이미지의 색상을 OKLab 거리 기준 가장 가까운 팔레트 색상으로 변환합니다.
 // 원본 픽셀의 알파 값은 그대로 유지합니다.
-func ConvertToPalette(inputPath, outputPath string, paletteColors []color.NRGBA, paletteOKLabs []common.OKLab) (string, error) {
+func Recolor(inputPath, outputPath string, paletteColors []color.NRGBA, paletteOKLabs []common.OKLab) (string, error) {
 	src, err := common.LoadPNG(inputPath)
 	if err != nil {
 		return "", err

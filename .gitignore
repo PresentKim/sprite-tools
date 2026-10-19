@@ -7,7 +7,7 @@
 sprite-tools
 
 # Test files / outputs
-*-simplified.png
+*-reduced.png
 *-downscaled.png
-*-paletted.png
+*-indexed.png
 *-recolored.png

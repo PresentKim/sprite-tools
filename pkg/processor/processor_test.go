@@ -49,7 +49,7 @@ func TestDownscale(t *testing.T) {
 	}
 }
 
-func TestFixPaletteTooManyColors(t *testing.T) {
+func TestIndexTooManyColors(t *testing.T) {
 	dir := t.TempDir()
 	in := filepath.Join(dir, "a.png")
 	img := image.NewNRGBA(image.Rect(0, 0, 300, 1))
@@ -57,12 +57,12 @@ func TestFixPaletteTooManyColors(t *testing.T) {
 		img.Set(x, 0, color.NRGBA{uint8(x), uint8(x >> 8), 0, 255})
 	}
 	common.SavePNG(in, img)
-	if _, err := FixPalette(in, filepath.Join(dir, "b.png")); err == nil {
+	if _, err := Index(in, filepath.Join(dir, "b.png")); err == nil {
 		t.Fatal("expected error for >255 colors")
 	}
 }
 
-func TestFixPaletteTransparentIndexZero(t *testing.T) {
+func TestIndexTransparentIndexZero(t *testing.T) {
 	dir := t.TempDir()
 	in, out := filepath.Join(dir, "a.png"), filepath.Join(dir, "b.png")
 	img := image.NewNRGBA(image.Rect(0, 0, 3, 1))
@@ -70,7 +70,7 @@ func TestFixPaletteTransparentIndexZero(t *testing.T) {
 	img.Set(1, 0, color.NRGBA{0, 0, 0, 0})
 	img.Set(2, 0, color.NRGBA{9, 9, 9, 0})
 	common.SavePNG(in, img)
-	if _, err := FixPalette(in, out); err != nil {
+	if _, err := Index(in, out); err != nil {
 		t.Fatal(err)
 	}
 	res, _ := common.LoadPNG(out)
@@ -83,7 +83,7 @@ func TestFixPaletteTransparentIndexZero(t *testing.T) {
 	}
 }
 
-func TestSimplifyKeepsDominantColor(t *testing.T) {
+func TestReduceKeepsDominantColor(t *testing.T) {
 	dir := t.TempDir()
 	in, out := filepath.Join(dir, "a.png"), filepath.Join(dir, "b.png")
 	rare := color.NRGBA{200, 0, 0, 255}
@@ -94,7 +94,7 @@ func TestSimplifyKeepsDominantColor(t *testing.T) {
 		img.Set(x, 0, common_)
 	}
 	common.SavePNG(in, img)
-	if _, err := Simplify(in, out, 0.05); err != nil {
+	if _, err := Reduce(in, out, 0.05); err != nil {
 		t.Fatal(err)
 	}
 	res, _ := common.LoadPNG(out)
@@ -103,13 +103,13 @@ func TestSimplifyKeepsDominantColor(t *testing.T) {
 	}
 }
 
-func TestSplit(t *testing.T) {
+func TestSlice(t *testing.T) {
 	dir := t.TempDir()
 	in := filepath.Join(dir, "sheet.png")
 	img := image.NewNRGBA(image.Rect(0, 0, 8, 4))
 	img.Set(0, 0, color.NRGBA{1, 2, 3, 255}) // 첫 프레임만 내용 있음
 	common.SavePNG(in, img)
-	msg, err := SplitFile(in, 4, 4, "", false)
+	msg, err := SliceFile(in, 4, 4, "", false)
 	if err != nil {
 		t.Fatal(err)
 	}

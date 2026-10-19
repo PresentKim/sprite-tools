@@ -94,7 +94,7 @@ func DeltaOKLabWeighted(c1, c2 OKLab) float64 {
 	return baseDist * penalty
 }
 
-// DeltaOKLab: 기본 순수 유클리드 거리 (Simplify 등에서 사용)
+// DeltaOKLab: 기본 순수 유클리드 거리 (현재 미사용)
 func DeltaOKLab(c1, c2 OKLab) float64 {
 	dL := c1.L - c2.L
 	dA := c1.A - c2.A

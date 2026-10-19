@@ -23,9 +23,9 @@ func isFrameEmpty(img image.Image, rect image.Rectangle) bool {
 	return true
 }
 
-// SplitFile: 스프라이트 시트를 frameW x frameH 크기로 잘라 "<이름>-0001.png" 형태로 저장합니다.
+// SliceFile: 스프라이트 시트를 frameW x frameH 크기로 잘라 "<이름>-0001.png" 형태로 저장합니다.
 // outDir 가 비어 있으면 원본과 같은 폴더에 저장합니다. 완전히 투명한 프레임은 건너뜁니다.
-func SplitFile(path string, frameW, frameH int, outDir string, keepEmpty bool) (string, error) {
+func SliceFile(path string, frameW, frameH int, outDir string, keepEmpty bool) (string, error) {
 	srcImg, err := common.LoadPNG(path)
 	if err != nil {
 		return "", err

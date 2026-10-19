@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -21,6 +22,8 @@ const (
 
 type command struct {
 	name    string
+	aliases []string // 짧은 별칭
+	legacy  []string // 이전 이름 (호환용, 도움말에는 표시하지 않음)
 	summary string
 	usage   string // 인자 형식
 	details string // 설명 및 예시
@@ -31,38 +34,39 @@ var commands []command
 
 func init() {
 	commands = []command{
-		{"simplify", "비슷한 색상을 합쳐 색상 수를 줄입니다 (OKLab 기준)", "[경로...] [옵션]",
+		{"reduce", []string{"rd"}, []string{"simplify"}, "비슷한 색상을 합쳐 색상 수를 줄입니다 (OKLab 기준)", "[경로...] [옵션]",
 			`많이 쓰인 색상부터 대표 색상으로 잡고, 거리가 -t 미만인 색상을 대표 색상으로 합칩니다.
 
 예시:
-  sprite-tools simplify                      현재 폴더의 *.png → *-simplified.png
-  sprite-tools simplify hero.png -t 0.08     더 과감하게 합치기
-  sprite-tools simplify assets -r -w         assets 하위 전체를 원본에 덮어쓰기`, runSimplify},
-		{"split", "스프라이트 시트를 프레임 단위로 자릅니다", "[경로...] [옵션]",
+  sprite-tools reduce                        현재 폴더의 *.png → *-reduced.png
+  sprite-tools rd hero.png -t 0.08           더 과감하게 합치기
+  sprite-tools rd assets -r -w               assets 하위 전체를 원본에 덮어쓰기`, runReduce},
+		{"slice", []string{"sl"}, []string{"split"}, "스프라이트 시트를 프레임 단위로 자릅니다", "[경로...] [옵션]",
 			`<이름>-0001.png, <이름>-0002.png ... 로 저장합니다. 완전히 투명한 프레임은 건너뜁니다.
 
 예시:
-  sprite-tools split sheet.png -size 32
-  sprite-tools split sheet.png -size 16x24 -o frames`, runSplit},
-		{"downscale", "확대된 픽셀 아트를 1:1 크기로 줄입니다", "[경로...] [옵션]",
+  sprite-tools slice sheet.png -size 32
+  sprite-tools sl sheet.png -size 16x24 -o frames`, runSlice},
+		{"downscale", []string{"ds"}, nil, "확대된 픽셀 아트를 1:1 크기로 줄입니다", "[경로...] [옵션]",
 			`같은 색이 이어지는 길이로 확대 배율을 자동 감지합니다. -scale 로 직접 지정할 수 있습니다.
 
 예시:
   sprite-tools downscale big.png
-  sprite-tools downscale -scale 4 -w`, runDownscale},
-		{"palette", "인덱스 PNG로 변환하고 0번 색을 투명(#ffffff00)으로 맞춥니다", "[경로...] [옵션]",
+  sprite-tools ds -scale 4 -w`, runDownscale},
+		{"index", []string{"ix"}, []string{"palette"}, "인덱스(팔레트) PNG로 변환하고 0번 색을 투명(#ffffff00)으로 맞춥니다", "[경로...] [옵션]",
 			`색상 순서는 이미지에 처음 등장한 순서이며, 255색을 넘으면 실패합니다.
 
 예시:
-  sprite-tools palette -w`, runPalette},
-		{"palette-convert", "Lospec 팔레트(또는 PNG 팔레트)의 색으로 바꿉니다", "-p <팔레트> [경로...] [옵션]",
+  sprite-tools index -w
+  sprite-tools ix sprites -r`, runIndex},
+		{"recolor", []string{"rc"}, []string{"palette-convert"}, "Lospec 팔레트(또는 PNG 팔레트)의 색으로 바꿉니다", "-p <팔레트> [경로...] [옵션]",
 			`-p 에는 Lospec 팔레트 이름(예: otterisk-96) 또는 팔레트 PNG 파일 경로를 줍니다.
 다운로드한 팔레트는 실행 파일 옆 palettes 폴더에 저장되어 다음부터 오프라인으로 사용됩니다.
 
 예시:
-  sprite-tools palette-convert -p otterisk-96
-  sprite-tools palette-convert -p my-palette.png hero.png
-  sprite-tools palette-convert -list`, runPaletteConvert},
+  sprite-tools recolor -p otterisk-96
+  sprite-tools rc -p my-palette.png hero.png
+  sprite-tools rc -list`, runRecolor},
 	}
 }
 
@@ -77,42 +81,67 @@ func run(args []string) int {
 	}
 	name := args[0]
 	switch name {
-	case "-h", "--help", "help":
+	case "-h", "--help", "help", "h":
 		if len(args) > 1 {
-			if cmd := findCommand(args[1]); cmd != nil {
+			if cmd, _ := resolveCommand(args[1]); cmd != nil {
 				return cmd.run([]string{"-h"})
 			}
 		}
 		printHelp()
 		return exitOK
 	}
-	cmd := findCommand(name)
+	cmd, candidates := resolveCommand(name)
 	if cmd == nil {
 		fmt.Fprintf(os.Stderr, "알 수 없는 명령: %s\n", name)
-		if s := suggest(name); s != "" {
+		if len(candidates) > 1 {
+			fmt.Fprintf(os.Stderr, "여러 명령과 겹칩니다: %s\n", strings.Join(candidates, ", "))
+		} else if s := suggest(name); s != "" {
 			fmt.Fprintf(os.Stderr, "혹시 '%s' 를 찾으셨나요?\n", s)
 		}
 		fmt.Fprintf(os.Stderr, "'%s help' 로 명령 목록을 확인하세요.\n", programName)
 		return exitUsage
 	}
+	if slices.Contains(cmd.legacy, strings.ToLower(name)) {
+		fmt.Fprintf(os.Stderr, "참고: '%s' 는 '%s' 로 이름이 바뀌었습니다.\n", name, cmd.name)
+	}
 	return cmd.run(args[1:])
 }
 
-func findCommand(name string) *command {
+// resolveCommand: 정식 이름, 별칭, 이전 이름, 겹치지 않는 앞부분(예: "red")으로 명령을 찾습니다.
+// 찾지 못했고 앞부분이 여러 명령과 겹치면 후보 목록을 함께 반환합니다.
+func resolveCommand(name string) (*command, []string) {
+	name = strings.ToLower(name)
+	if name == "" {
+		return nil, nil
+	}
 	for i := range commands {
-		if commands[i].name == name {
-			return &commands[i]
+		c := &commands[i]
+		if c.name == name || slices.Contains(c.aliases, name) || slices.Contains(c.legacy, name) {
+			return c, nil
 		}
 	}
-	return nil
+	var matches []*command
+	var names []string
+	for i := range commands {
+		if strings.HasPrefix(commands[i].name, name) {
+			matches = append(matches, &commands[i])
+			names = append(names, commands[i].name)
+		}
+	}
+	if len(matches) == 1 {
+		return matches[0], nil
+	}
+	return nil, names
 }
 
 // suggest: 오타로 보이는 명령에 대해 가장 비슷한 명령을 추천합니다.
 func suggest(name string) string {
 	best, bestDist := "", 3
 	for _, c := range commands {
-		if d := levenshtein(name, c.name); d < bestDist || strings.HasPrefix(c.name, name) && name != "" {
-			best, bestDist = c.name, d
+		for _, n := range append([]string{c.name}, c.legacy...) {
+			if d := levenshtein(name, n); d < bestDist {
+				best, bestDist = c.name, d
+			}
 		}
 	}
 	return best
@@ -142,25 +171,30 @@ func printHelp() {
 	fmt.Println("Sprite Tools - 픽셀 아트 명령줄 도구")
 	fmt.Println()
 	fmt.Printf("사용법:\n  %s <명령> [경로...] [옵션]\n\n", programName)
-	fmt.Println("명령:")
+	fmt.Println("명령:       별칭")
 	for _, c := range commands {
-		fmt.Printf("  %-16s %s\n", c.name, c.summary)
+		fmt.Printf("  %-10s %-5s %s\n", c.name, strings.Join(c.aliases, ","), c.summary)
 	}
 	fmt.Println()
 	fmt.Println("공통 동작:")
 	fmt.Println("  - 경로를 생략하면 현재 폴더의 PNG를 처리합니다. 파일과 폴더를 여러 개 줄 수 있습니다.")
 	fmt.Println("  - 기본적으로 원본은 그대로 두고 접미사(-s)가 붙은 새 파일로 저장합니다. 덮어쓰려면 -w.")
 	fmt.Println("  - -n 으로 실제 처리 없이 대상 파일만 미리 볼 수 있습니다.")
+	fmt.Println("  - 명령은 별칭이나 겹치지 않는 앞부분으로 줄여 쓸 수 있습니다 (예: rd, red, d).")
 	fmt.Println()
 	fmt.Printf("자세한 옵션: %s help <명령>\n", programName)
 }
 
 func newFlagSet(name string) (*flag.FlagSet, *command) {
-	cmd := findCommand(name)
+	cmd, _ := resolveCommand(name)
 	fs := flag.NewFlagSet(name, flag.ContinueOnError)
 	fs.Usage = func() {
 		out := fs.Output()
-		fmt.Fprintf(out, "%s\n\n사용법:\n  %s %s %s\n\n옵션:\n", cmd.summary, programName, name, cmd.usage)
+		fmt.Fprintf(out, "%s\n\n사용법:\n  %s %s %s\n", cmd.summary, programName, name, cmd.usage)
+		if len(cmd.aliases) > 0 {
+			fmt.Fprintf(out, "  (별칭: %s)\n", strings.Join(cmd.aliases, ", "))
+		}
+		fmt.Fprintf(out, "\n옵션:\n")
 		fs.PrintDefaults()
 		fmt.Fprintf(out, "\n%s\n", cmd.details)
 	}
@@ -256,10 +290,10 @@ func usageError(fs *flag.FlagSet, format string, a ...any) int {
 	return exitUsage
 }
 
-func runSimplify(args []string) int {
-	fs, _ := newFlagSet("simplify")
+func runReduce(args []string) int {
+	fs, _ := newFlagSet("reduce")
 	threshold := fs.Float64("t", 0.05, "색상 병합 기준 거리 (클수록 더 많이 합침, 권장 0.02~0.15)")
-	b := addBatchFlags(fs, "-simplified", true)
+	b := addBatchFlags(fs, "-reduced", true)
 	roots, code, ok := parseOrExit(fs, args)
 	if !ok {
 		return code
@@ -268,7 +302,7 @@ func runSimplify(args []string) int {
 		return usageError(fs, "-t 는 0보다 커야 합니다")
 	}
 	return execute(b.options(roots), func(in, out string) (string, error) {
-		return processor.Simplify(in, out, *threshold)
+		return processor.Reduce(in, out, *threshold)
 	})
 }
 
@@ -288,14 +322,14 @@ func runDownscale(args []string) int {
 	})
 }
 
-func runPalette(args []string) int {
-	fs, _ := newFlagSet("palette")
-	b := addBatchFlags(fs, "-paletted", true)
+func runIndex(args []string) int {
+	fs, _ := newFlagSet("index")
+	b := addBatchFlags(fs, "-indexed", true)
 	roots, code, ok := parseOrExit(fs, args)
 	if !ok {
 		return code
 	}
-	return execute(b.options(roots), processor.FixPalette)
+	return execute(b.options(roots), processor.Index)
 }
 
 // parseSize: "16" 또는 "16x24" 형식의 프레임 크기를 해석합니다.
@@ -320,8 +354,8 @@ func parseSize(s string) (int, int, error) {
 	return w, h, nil
 }
 
-func runSplit(args []string) int {
-	fs, _ := newFlagSet("split")
+func runSlice(args []string) int {
+	fs, _ := newFlagSet("slice")
 	size := fs.String("size", "16", "프레임 크기 (예: 16 또는 16x24)")
 	outDir := fs.String("o", "", "프레임을 저장할 폴더 (기본: 원본과 같은 폴더)")
 	keepEmpty := fs.Bool("keep-empty", false, "완전히 투명한 프레임도 저장")
@@ -335,12 +369,12 @@ func runSplit(args []string) int {
 		return usageError(fs, "-size '%s': %v", *size, err)
 	}
 	return execute(b.options(roots), func(in, _ string) (string, error) {
-		return processor.SplitFile(in, w, h, *outDir, *keepEmpty)
+		return processor.SliceFile(in, w, h, *outDir, *keepEmpty)
 	})
 }
 
-func runPaletteConvert(args []string) int {
-	fs, _ := newFlagSet("palette-convert")
+func runRecolor(args []string) int {
+	fs, _ := newFlagSet("recolor")
 	paletteSpec := fs.String("p", "", "Lospec 팔레트 이름 또는 팔레트 PNG 경로 (예: otterisk-96)")
 	list := fs.Bool("list", false, "다운로드된 로컬 팔레트 목록 표시")
 	b := addBatchFlags(fs, "-recolored", true)
@@ -383,6 +417,6 @@ func runPaletteConvert(args []string) int {
 	fmt.Printf("팔레트 %s (%d색)\n", palettePath, len(rawColors))
 
 	return execute(b.options(roots), func(in, out string) (string, error) {
-		return processor.ConvertToPalette(in, out, rawColors, labColors)
+		return processor.Recolor(in, out, rawColors, labColors)
 	})
 }

@@ -9,9 +9,9 @@ import (
 	"sprite-tools/pkg/common"
 )
 
-// Simplify: 비슷한 색상(OKLab 가중 거리 < threshold)을 하나의 대표 색상으로 합칩니다.
+// Reduce: 비슷한 색상(OKLab 가중 거리 < threshold)을 하나의 대표 색상으로 합칩니다.
 // 많이 쓰인 색상부터 대표로 선택하므로 결과가 픽셀 순서에 좌우되지 않습니다.
-func Simplify(inputPath, outputPath string, threshold float64) (string, error) {
+func Reduce(inputPath, outputPath string, threshold float64) (string, error) {
 	src, err := common.LoadPNG(inputPath)
 	if err != nil {
 		return "", err
