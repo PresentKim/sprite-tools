@@ -1,0 +1,12 @@
+# Executables
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+sprite-tools
+
+# Test files / outputs
+*-simplified.png
+*-downscaled.png
+*-paletted.png
