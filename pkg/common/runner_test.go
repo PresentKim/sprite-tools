@@ -273,3 +273,157 @@ func TestRunFilesEmpty(t *testing.T) {
 		t.Errorf("summary = %+v", sum)
 	}
 }
+
+func TestOutputForOutDir(t *testing.T) {
+	root := filepath.Join("proj", "art")
+	o := Options{OutDir: "out", Suffix: "-x"}
+	tests := []struct {
+		name string
+		o    Options
+		in   Input
+		want string
+	}{
+		{"루트 기준 상대 경로 유지", o, Input{filepath.Join(root, "sub", "a.png"), root}, filepath.Join("out", "sub", "a-x.png")},
+		{"루트 바로 아래 파일", o, Input{filepath.Join(root, "a.png"), root}, filepath.Join("out", "a-x.png")},
+		{"직접 지정한 파일은 OutDir 바로 아래", o, Input{Path: filepath.Join("elsewhere", "deep", "a.png")}, filepath.Join("out", "a-x.png")},
+		{"접미사 없이", Options{OutDir: "out"}, Input{filepath.Join(root, "sub", "a.png"), root}, filepath.Join("out", "sub", "a.png")},
+		{"OutDir 없으면 원본 옆", Options{Suffix: "-x"}, Input{filepath.Join(root, "a.png"), root}, filepath.Join(root, "a-x.png")},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.o.OutputFor(tt.in); got != tt.want {
+				t.Errorf("OutputFor = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestValidateOutDir(t *testing.T) {
+	if err := (Options{InPlace: true, OutDir: "out"}).Validate(); err == nil {
+		t.Error("InPlace + OutDir 은 에러여야 합니다")
+	}
+	if err := (Options{OutDir: "out"}).Validate(); err != nil {
+		t.Errorf("OutDir 만 있으면 접미사가 비어도 됩니다: %v", err)
+	}
+	if err := (Options{}).Validate(); err == nil {
+		t.Error("접미사도 OutDir 도 없으면 에러여야 합니다")
+	}
+}
+
+func TestCollectInputsRoots(t *testing.T) {
+	root := t.TempDir()
+	other := t.TempDir()
+	touch(t, filepath.Join(root, "a.png"))
+	touch(t, filepath.Join(root, "sub", "a.png"))
+	explicit := filepath.Join(other, "z.png")
+	touch(t, explicit)
+
+	inputs, err := CollectInputs(Options{Roots: []string{root, explicit}, Recursive: true, OutDir: filepath.Join(root, "out")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]string{}
+	for _, in := range inputs {
+		got[in.Path] = in.Root
+	}
+	want := map[string]string{
+		filepath.Join(root, "a.png"):        root,
+		filepath.Join(root, "sub", "a.png"): root,
+		explicit:                            "",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+	for p, r := range want {
+		if g, ok := got[p]; !ok || g != r {
+			t.Errorf("%s: root = %q (있음=%v), want %q", p, g, ok, r)
+		}
+	}
+}
+
+func TestCollectFilesExcludesOutDir(t *testing.T) {
+	root := t.TempDir()
+	touch(t, filepath.Join(root, "a.png"))
+	touch(t, filepath.Join(root, "out", "a.png"))
+	touch(t, filepath.Join(root, "out", "deep", "b.png"))
+	touch(t, filepath.Join(root, "sub", "c.png"))
+	got, err := CollectFiles(Options{Roots: []string{root}, Recursive: true, OutDir: filepath.Join(root, "out")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"a.png", "sub/c.png"}; !slices.Equal(names(t, root, got), want) {
+		t.Errorf("got %v, want %v", names(t, root, got), want)
+	}
+}
+
+func TestOutDirKeepsOwnOutputSkipping(t *testing.T) {
+	// 출력 폴더가 원본 폴더 자체이면 이전 출력(접미사 파일)은 입력에서 빠져야 합니다.
+	root := t.TempDir()
+	touch(t, filepath.Join(root, "a.png"))
+	touch(t, filepath.Join(root, "a-x.png"))
+	got, err := CollectFiles(Options{Roots: []string{root}, OutDir: root, Suffix: "-x"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"a.png"}; !slices.Equal(names(t, root, got), want) {
+		t.Errorf("got %v, want %v", names(t, root, got), want)
+	}
+}
+
+func TestRunInputsOutDir(t *testing.T) {
+	root := t.TempDir()
+	touch(t, filepath.Join(root, "a.png"))
+	touch(t, filepath.Join(root, "sub", "a.png"))
+	outDir := filepath.Join(t.TempDir(), "result")
+	o := Options{Roots: []string{root}, Recursive: true, OutDir: outDir, Suffix: "-x", Threads: 2}
+	inputs, err := CollectInputs(o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	outs := map[string]bool{}
+	sum := RunInputs(context.Background(), inputs, o, func(in, out string) (string, error) {
+		return "", os.WriteFile(out, []byte("x"), 0o644)
+	}, func(r Result) { outs[r.Output] = true })
+	if sum.Done != 2 || sum.Failed != 0 {
+		t.Fatalf("summary = %+v", sum)
+	}
+	for _, rel := range []string{"a-x.png", filepath.Join("sub", "a-x.png")} {
+		if _, err := os.Stat(filepath.Join(outDir, rel)); err != nil {
+			t.Errorf("%s 가 만들어져야 합니다: %v", rel, err)
+		}
+		if !outs[filepath.Join(outDir, rel)] {
+			t.Errorf("결과에 출력 경로 %s 가 없습니다", rel)
+		}
+	}
+}
+
+func TestPlanOutputsConflicts(t *testing.T) {
+	root := t.TempDir()
+	// 접미사 없이 같은 폴더로 내보내면 원본을 덮어쓰게 되므로 실패 처리됩니다.
+	in := Input{Path: filepath.Join(root, "a.png"), Root: root}
+	plans := Options{OutDir: root}.PlanOutputs([]Input{in})
+	if plans[0].Err == nil {
+		t.Error("원본과 같은 경로는 에러여야 합니다")
+	}
+	// 직접 지정한 서로 다른 폴더의 같은 이름 파일이 OutDir 에서 겹침
+	a := Input{Path: filepath.Join(root, "x", "a.png")}
+	b := Input{Path: filepath.Join(root, "y", "a.png")}
+	plans = Options{OutDir: filepath.Join(root, "out")}.PlanOutputs([]Input{a, b})
+	if plans[0].Err != nil || plans[1].Err == nil {
+		t.Errorf("두 번째만 충돌이어야 합니다: %+v", plans)
+	}
+	// 덮어쓰기는 검사하지 않음
+	plans = Options{InPlace: true}.PlanOutputs([]Input{in})
+	if plans[0].Err != nil {
+		t.Errorf("InPlace 는 허용: %v", plans[0].Err)
+	}
+}
+
+func TestNaturalSort(t *testing.T) {
+	list := []string{"frame-10.png", "frame-2.png", "Frame-1.png", "frame-02.png", "a.png", "frame-1b.png"}
+	NaturalSort(list)
+	want := []string{"a.png", "Frame-1.png", "frame-1b.png", "frame-2.png", "frame-02.png", "frame-10.png"}
+	if !slices.Equal(list, want) {
+		t.Errorf("got %v, want %v", list, want)
+	}
+}

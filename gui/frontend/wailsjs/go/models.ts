@@ -4,6 +4,7 @@ export namespace main {
 	    path: string;
 	    name: string;
 	    dir: string;
+	    root: string;
 	    width: number;
 	    height: number;
 	    bytes: number;
@@ -18,10 +19,25 @@ export namespace main {
 	        this.path = source["path"];
 	        this.name = source["name"];
 	        this.dir = source["dir"];
+	        this.root = source["root"];
 	        this.width = source["width"];
 	        this.height = source["height"];
 	        this.bytes = source["bytes"];
 	        this.error = source["error"];
+	    }
+	}
+	export class InputFile {
+	    path: string;
+	    root: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new InputFile(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.path = source["path"];
+	        this.root = source["root"];
 	    }
 	}
 	export class JobRequest {
@@ -36,6 +52,12 @@ export namespace main {
 	    suffix: string;
 	    inPlace: boolean;
 	    threads: number;
+	    pad: number;
+	    saveName: string;
+	    force: boolean;
+	    cols: number;
+	    gap: number;
+	    align: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new JobRequest(source);
@@ -54,6 +76,28 @@ export namespace main {
 	        this.suffix = source["suffix"];
 	        this.inPlace = source["inPlace"];
 	        this.threads = source["threads"];
+	        this.pad = source["pad"];
+	        this.saveName = source["saveName"];
+	        this.force = source["force"];
+	        this.cols = source["cols"];
+	        this.gap = source["gap"];
+	        this.align = source["align"];
+	    }
+	}
+	export class PackResult {
+	    canceled: boolean;
+	    output: string;
+	    message: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new PackResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.canceled = source["canceled"];
+	        this.output = source["output"];
+	        this.message = source["message"];
 	    }
 	}
 	export class PaletteInfo {

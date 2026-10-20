@@ -1,19 +1,26 @@
 import './style.css';
 import {
   Cancel, DefaultSuffix, Describe, ExpandPaths, ListPalettes, LoadPalette,
-  PickFiles, PickFolder, PickPaletteFile, Preview, Reveal, Run,
+  PickFiles, PickFolder, PickPaletteFile, Preview, PreviewPack, Reveal, Run, RunPack,
 } from '../wailsjs/go/main/App';
 import { BrowserOpenURL, EventsOn, OnFileDrop } from '../wailsjs/runtime/runtime';
 
+// out: 결과를 저장하는 방식 — file(접미사/다른 폴더/덮어쓰기), extract(덮어쓰기 제외), slice(프레임 폴더), pack(저장 시 파일 선택)
+// 순서가 Alt+1..9 단축키 순서이고, group 이 바뀌는 곳에 탭 구분선이 들어갑니다.
 const COMMANDS = [
-  { id: 'reduce', label: '색상 줄이기', desc: '비슷한 색상을 합쳐 색상 수를 줄입니다. 많이 쓰인 색이 대표 색으로 남습니다.' },
-  { id: 'slice', label: '프레임 자르기', desc: '스프라이트 시트를 같은 크기의 프레임으로 잘라 각각 저장합니다.' },
-  { id: 'downscale', label: '1:1 축소', desc: '확대해서 저장된 픽셀 아트를 원래 크기로 되돌립니다.' },
-  { id: 'index', label: '인덱스 PNG', desc: '팔레트(인덱스) PNG로 바꾸고 0번 색을 투명(#ffffff00)으로 맞춥니다.' },
-  { id: 'recolor', label: '팔레트 적용', desc: '모든 색을 선택한 팔레트에서 가장 가까운 색으로 바꿉니다.' },
+  { id: 'reduce', group: 0, label: '색상 줄이기', out: 'file', desc: '비슷한 색상을 합쳐 색상 수를 줄입니다. 많이 쓰인 색이 대표 색으로 남습니다.' },
+  { id: 'recolor', group: 0, label: '팔레트 적용', out: 'file', desc: '모든 색을 선택한 팔레트에서 가장 가까운 색으로 바꿉니다.' },
+  { id: 'index', group: 0, label: '인덱스 PNG', out: 'file', desc: '팔레트(인덱스) PNG로 바꾸고 0번 색을 투명(#ffffff00)으로 맞춥니다.' },
+  { id: 'extract', group: 0, label: '팔레트 추출', out: 'extract', desc: '이미지에 쓰인 색을 팔레트 PNG로 뽑습니다. 이름을 주면 팔레트 목록에도 저장됩니다.' },
+  { id: 'downscale', group: 1, label: '1:1 축소', out: 'file', desc: '확대해서 저장된 픽셀 아트를 원래 크기로 되돌립니다.' },
+  { id: 'upscale', group: 1, label: '확대', out: 'file', desc: '정수 배율로 픽셀을 그대로 키웁니다(최근접 이웃).' },
+  { id: 'trim', group: 1, label: '여백 자르기', out: 'file', desc: '투명한 바깥 여백을 잘라냅니다. 필요하면 일정한 여백을 남길 수 있습니다.' },
+  { id: 'slice', group: 2, label: '프레임 자르기', out: 'slice', desc: '스프라이트 시트를 같은 크기의 프레임으로 잘라 각각 저장합니다.' },
+  { id: 'pack', group: 2, label: '시트 합치기', out: 'pack', desc: '목록의 모든 이미지를 한 장의 스프라이트 시트로 합칩니다(프레임 자르기의 반대).' },
 ];
 const FRAME_PRESETS = ['8', '16', '24', '32', '48', '64', '16x32'];
 const SCALES = [0, 2, 3, 4, 5, 6, 8, 10, 12, 16];
+const UPSCALES = [2, 3, 4, 5, 6, 8, 10, 12, 16];
 const ZOOMS = [['fit', '맞춤'], [1, '1x'], [2, '2x'], [4, '4x'], [8, '8x']];
 const STATUS_LABEL = { done: '완료', skipped: '건너뜀', failed: '실패', running: '처리 중' };
 
@@ -34,10 +41,16 @@ const defaults = {
   maxColors: 16,
   frameSize: '16',
   keepEmpty: false,
-  outDir: '',
+  outDir: '', // 프레임 자르기의 프레임 저장 폴더
   scale: 0,
+  upscale: 2,
+  pad: 0,
+  packCols: 0,
+  packGap: 0,
+  packAlign: 'topleft', // topleft | center
   palette: '',
-  inPlace: false,
+  outMode: 'suffix', // suffix | dir | inplace
+  exportDir: '', // 다른 폴더에 저장할 때의 폴더
   suffixes: {},
   threads: 0,
   recursive: true,
@@ -53,7 +66,11 @@ const state = {
 
 function loadSettings() {
   try {
-    return { ...defaults, ...JSON.parse(localStorage.getItem('sprite-tools') || '{}') };
+    const stored = JSON.parse(localStorage.getItem('sprite-tools') || '{}');
+    const s = { ...defaults, ...stored };
+    // 예전 설정(inPlace 불리언)을 저장 방식으로 옮깁니다.
+    if (!stored.outMode && stored.inPlace) s.outMode = 'inplace';
+    return s;
   } catch {
     return { ...defaults };
   }
@@ -67,20 +84,39 @@ async function suffixFor(cmd) {
   return settings.suffixes[cmd];
 }
 
+function cmdInfo() {
+  return COMMANDS.find((c) => c.id === settings.command) || COMMANDS[0];
+}
+
+// 현재 명령에 실제로 적용되는 저장 방식입니다. 슬라이스/합치기는 따로 저장 위치를 정하고, 팔레트 추출은 덮어쓰기를 지원하지 않습니다.
+function effMode() {
+  const out = cmdInfo().out;
+  if (out === 'slice' || out === 'pack') return 'none';
+  if (out === 'extract' && settings.outMode === 'inplace') return 'suffix';
+  return settings.outMode;
+}
+
 function request() {
   const cmd = settings.command;
+  const mode = effMode();
   return {
     command: cmd,
     threshold: Number(settings.threshold),
     maxColors: settings.reduceMode === 'count' ? Math.round(Number(settings.maxColors)) || 16 : 0,
-    scale: Number(settings.scale),
+    scale: cmd === 'upscale' ? Number(settings.upscale) : Number(settings.scale),
     frameSize: settings.frameSize,
-    outDir: settings.outDir,
+    outDir: cmd === 'slice' ? settings.outDir : mode === 'dir' ? settings.exportDir : '',
     keepEmpty: settings.keepEmpty,
     palette: settings.palette,
     suffix: settings.suffixes[cmd] ?? '',
-    inPlace: settings.inPlace,
+    inPlace: mode === 'inplace',
     threads: Number(settings.threads) || 0,
+    pad: Math.max(0, Math.round(Number(settings.pad)) || 0),
+    saveName: cmd === 'extract' ? $('save-name').value.trim() : '',
+    force: cmd === 'extract' && $('save-force').checked,
+    cols: Math.max(0, Math.round(Number(settings.packCols)) || 0),
+    gap: Math.max(0, Math.round(Number(settings.packGap)) || 0),
+    align: settings.packAlign,
   };
 }
 
@@ -93,10 +129,11 @@ function renderTabs() {
   const tabs = $('tabs');
   tabs.replaceChildren();
   COMMANDS.forEach((c, i) => {
+    if (i > 0 && c.group !== COMMANDS[i - 1].group) tabs.append(el('span', 'tab-sep'));
     const b = el('button', 'tab');
     b.setAttribute('role', 'tab');
     b.setAttribute('aria-selected', String(c.id === settings.command));
-    b.title = `Alt+${i + 1}`;
+    b.title = `${c.label} (Alt+${i + 1})`;
     b.append(c.label);
     b.onclick = () => setCommand(c.id);
     tabs.append(b);
@@ -111,23 +148,31 @@ async function setCommand(id) {
   $('cmd-title').textContent = c.label;
   $('cmd-desc').textContent = c.desc;
   document.querySelectorAll('[data-cmd]').forEach((g) => { g.hidden = g.dataset.cmd !== id; });
-  $('output-file').hidden = id === 'slice';
-  $('output-dir').hidden = id !== 'slice';
+  $('output-group').hidden = c.out === 'pack';
+  $('output-file').hidden = c.out === 'slice' || c.out === 'pack';
+  $('output-dir').hidden = c.out !== 'slice';
+  $('inplace-radio').hidden = c.out === 'extract';
   $('suffix').value = await suffixFor(id);
-  if (id === 'recolor' && state.palettes.length === 0) refreshPalettes();
+  if (id === 'recolor') refreshPalettes(); // 팔레트 추출에서 저장한 팔레트가 바로 보이도록 매번 갱신
   renderOutput();
   renderRunButton();
   schedulePreview();
 }
 
 function renderOutput() {
-  document.querySelectorAll('input[name="out-mode"]').forEach((r) => {
-    r.checked = (r.value === 'inplace') === settings.inPlace;
-  });
-  $('suffix').disabled = settings.inPlace;
-  $('inplace-warn').hidden = !settings.inPlace;
+  const mode = effMode();
+  document.querySelectorAll('input[name="out-mode"]').forEach((r) => { r.checked = r.value === mode; });
+  $('suffix-box').hidden = mode === 'inplace';
+  $('export-dir-box').hidden = mode !== 'dir';
+  $('inplace-warn').hidden = mode !== 'inplace';
   const sfx = settings.suffixes[settings.command] ?? '';
-  $('suffix-example').textContent = sfx ? `hero.png → hero${sfx}.png` : '접미사를 입력하세요';
+  if (mode === 'dir') {
+    $('suffix-example').textContent = `hero.png → (폴더)/hero${sfx}.png` + (sfx ? '' : ' · 접미사는 비워도 됩니다');
+  } else {
+    $('suffix-example').textContent = sfx ? `hero.png → hero${sfx}.png` : '접미사를 입력하세요';
+  }
+  $('export-dir-label').textContent = settings.exportDir || '폴더를 선택하세요';
+  $('export-dir-label').title = settings.exportDir;
   $('out-dir-label').textContent = settings.outDir || '원본과 같은 폴더';
   $('out-dir-label').title = settings.outDir;
 }
@@ -178,9 +223,41 @@ function initOptions() {
   sc.value = settings.scale;
   sc.onchange = () => { settings.scale = Number(sc.value); saveSettings(); schedulePreview(); };
 
-  document.querySelectorAll('input[name="out-mode"]').forEach((r) => {
-    r.onchange = () => { settings.inPlace = r.value === 'inplace' && r.checked; saveSettings(); renderOutput(); };
+  const up = $('upscale-scale');
+  UPSCALES.forEach((s) => up.append(new Option(`${s}배`, s)));
+  up.value = settings.upscale;
+  up.onchange = () => { settings.upscale = Number(up.value); saveSettings(); schedulePreview(); };
+
+  const numberSetting = (id, key, max) => {
+    const input = $(id);
+    input.value = settings[key];
+    input.oninput = () => {
+      const v = Math.round(Number(input.value));
+      if (!(v >= 0)) return; // 입력 중인 빈 값은 무시
+      settings[key] = Math.min(max, v);
+      saveSettings();
+      schedulePreview();
+    };
+  };
+  numberSetting('trim-pad', 'pad', 256);
+  numberSetting('pack-cols', 'packCols', 256);
+  numberSetting('pack-gap', 'packGap', 64);
+  const showAlign = () => $('pack-align').querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.align === settings.packAlign));
+  showAlign();
+  $('pack-align').querySelectorAll('button').forEach((b) => {
+    b.onclick = () => { settings.packAlign = b.dataset.align; showAlign(); saveSettings(); schedulePreview(); };
   });
+
+  // 팔레트 저장 이름/덮어쓰기는 저장하지 않고 실행할 때만 읽습니다.
+  $('save-name').onkeydown = (e) => { if (e.key === 'Enter') startRun(); };
+
+  document.querySelectorAll('input[name="out-mode"]').forEach((r) => {
+    r.onchange = () => { if (r.checked) { settings.outMode = r.value; saveSettings(); renderOutput(); } };
+  });
+  $('export-dir-pick').onclick = async () => {
+    const dir = await PickFolder('저장할 폴더 선택');
+    if (dir) { settings.exportDir = dir; saveSettings(); renderOutput(); }
+  };
   $('suffix').oninput = (e) => { settings.suffixes[settings.command] = e.target.value; saveSettings(); renderOutput(); };
 
   $('out-dir-pick').onclick = async () => {
@@ -404,13 +481,15 @@ function schedulePreview() {
 
 async function runPreview() {
   const f = selectedFile();
+  const packing = settings.command === 'pack';
+  const valid = state.files.filter((x) => !x.error);
   const seq = ++previewSeq;
   const origImg = $('orig-img');
   const resImg = $('result-img');
   const msg = $('result-msg');
 
   $('reveal-btn').disabled = !f;
-  if (!f) {
+  if (!f || (packing && !valid.length)) {
     $('preview-name').textContent = '미리보기';
     origImg.hidden = resImg.hidden = true;
     $('orig-meta').textContent = $('result-meta').textContent = '';
@@ -419,7 +498,7 @@ async function runPreview() {
     return;
   }
 
-  $('preview-name').textContent = f.name;
+  $('preview-name').textContent = packing ? `시트 미리보기 · ${valid.length}개 합침` : f.name;
   $('preview-name').title = f.path;
   const origSrc = localUrl(f);
   if (origImg.dataset.src !== origSrc) {
@@ -434,7 +513,7 @@ async function runPreview() {
   $('spinner').classList.add('on');
   let res;
   try {
-    res = await Preview(request(), f.path);
+    res = packing ? await PreviewPack(request(), valid.map((x) => x.path)) : await Preview(request(), f.path);
   } catch (err) {
     res = { status: 'failed', message: String(err) };
   }
@@ -507,10 +586,10 @@ function renderRunButton() {
     return;
   }
   const n = state.files.filter((f) => !f.error).length;
-  const label = COMMANDS.find((c) => c.id === settings.command).label;
+  const label = cmdInfo().label;
   b.textContent = n ? `${label} 실행 · ${n}개` : `${label} 실행`;
   b.className = 'btn primary run';
-  b.disabled = n === 0;
+  b.disabled = n === 0 || !!state.packing;
   $('run-hint').textContent = 'Ctrl+Enter';
 }
 
@@ -522,13 +601,26 @@ async function startRun() {
     toast('먼저 팔레트를 선택하세요', 'failed');
     return;
   }
-  if (settings.inPlace && settings.command !== 'slice' &&
+  if (settings.command === 'pack') {
+    await runPack(targets);
+    return;
+  }
+  const mode = effMode();
+  if (mode === 'dir' && !settings.exportDir) {
+    toast('저장할 폴더를 먼저 선택하세요', 'failed');
+    return;
+  }
+  if (mode === 'suffix' && !(settings.suffixes[settings.command] ?? '')) {
+    toast('출력 접미사를 입력하세요', 'failed');
+    return;
+  }
+  if (mode === 'inplace' &&
       !confirm(`원본 ${targets.length}개 파일을 덮어씁니다. 계속할까요?`)) return;
 
   targets.forEach((f) => { f.status = 'running'; f.message = ''; });
   renderFiles();
   try {
-    await Run(request(), targets.map((f) => f.path));
+    await Run(request(), targets.map((f) => ({ path: f.path, root: f.root || '' })));
   } catch (err) {
     targets.forEach((f) => { f.status = ''; });
     renderFiles();
@@ -539,6 +631,29 @@ async function startRun() {
   state.lastOutput = '';
   renderRunButton();
   setProgress(0, targets.length);
+}
+
+// 시트 합치기: 저장 위치를 고른 뒤 목록의 모든 파일을 한 장으로 합칩니다.
+async function runPack(targets) {
+  if (state.packing) return;
+  state.packing = true;
+  $('run-btn').disabled = true;
+  $('status-text').textContent = '시트 저장 위치를 선택하세요…';
+  try {
+    const r = await RunPack(request(), targets.map((f) => f.path));
+    if (r.canceled) {
+      $('status-text').textContent = '취소됨';
+    } else {
+      $('status-text').textContent = r.message;
+      toast(r.message, '', { label: '폴더 열기', run: () => Reveal(r.output) });
+    }
+  } catch (err) {
+    $('status-text').textContent = '실패';
+    toast(String(err), 'failed');
+  } finally {
+    state.packing = false;
+    renderRunButton();
+  }
 }
 
 function setProgress(done, total) {
@@ -565,10 +680,11 @@ EventsOn('job:done', async (s) => {
   renderRunButton();
 
   // 덮어쓴 파일은 크기·썸네일을 새로 읽습니다.
-  if (settings.inPlace && settings.command !== 'slice') {
+  const mode = effMode();
+  if (mode === 'inplace') {
     const done = state.files.filter((f) => f.status === 'done');
     const fresh = await Describe(done.map((f) => f.path));
-    fresh.forEach((e, i) => Object.assign(done[i], e, { v: Date.now() }));
+    fresh.forEach((e, i) => Object.assign(done[i], e, { root: done[i].root, v: Date.now() }));
   }
   renderFiles();
   schedulePreview();
@@ -576,11 +692,21 @@ EventsOn('job:done', async (s) => {
   const text = `${s.canceled ? '취소됨 · ' : ''}완료 ${s.done} · 건너뜀 ${s.skipped} · 실패 ${s.failed}`;
   $('status-text').textContent = text;
   $('status-right').textContent = `${s.seconds.toFixed(1)}초`;
-  toast(text, s.failed ? 'failed' : '', state.lastOutput && settings.command !== 'slice' && !settings.inPlace
-    ? { label: '결과 폴더 열기', run: () => Reveal(state.lastOutput) }
-    : settings.command === 'slice' && s.done
-      ? { label: '폴더 열기', run: () => Reveal(settings.outDir || state.lastOutput) }
-      : null);
+  let action = null;
+  if (mode === 'dir' && s.done && settings.exportDir) {
+    action = { label: '폴더 열기', run: () => Reveal(settings.exportDir) };
+  } else if (mode === 'suffix' && state.lastOutput) {
+    action = { label: '결과 폴더 열기', run: () => Reveal(state.lastOutput) };
+  } else if (settings.command === 'slice' && s.done) {
+    action = { label: '폴더 열기', run: () => Reveal(settings.outDir || state.lastOutput) };
+  }
+  toast(text, s.failed ? 'failed' : '', action);
+
+  // 팔레트 추출에서 이름을 주고 저장했다면 팔레트 목록을 새로 읽습니다.
+  if (settings.command === 'extract' && s.done) {
+    const saved = $('save-name').value.trim().toLowerCase();
+    if (saved) await refreshPalettes(saved);
+  }
 });
 
 // ---------- 공통 UI ----------
@@ -618,7 +744,7 @@ function initGlobal() {
     const typing = ['INPUT', 'SELECT', 'TEXTAREA'].includes(document.activeElement?.tagName);
     if (e.ctrlKey && e.key === 'Enter') { e.preventDefault(); startRun(); return; }
     if (e.key === 'Escape' && state.running) { Cancel(); return; }
-    if (e.altKey && /^[1-5]$/.test(e.key)) { e.preventDefault(); setCommand(COMMANDS[Number(e.key) - 1].id); return; }
+    if (e.altKey && /^[1-9]$/.test(e.key) && Number(e.key) <= COMMANDS.length) { e.preventDefault(); setCommand(COMMANDS[Number(e.key) - 1].id); return; }
     if (typing) return;
     const i = state.files.findIndex((f) => f.path === state.selected);
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {

@@ -46,10 +46,18 @@ export function Preview(arg1, arg2) {
   return window['go']['main']['App']['Preview'](arg1, arg2);
 }
 
+export function PreviewPack(arg1, arg2) {
+  return window['go']['main']['App']['PreviewPack'](arg1, arg2);
+}
+
 export function Reveal(arg1) {
   return window['go']['main']['App']['Reveal'](arg1);
 }
 
 export function Run(arg1, arg2) {
   return window['go']['main']['App']['Run'](arg1, arg2);
+}
+
+export function RunPack(arg1, arg2) {
+  return window['go']['main']['App']['RunPack'](arg1, arg2);
 }

@@ -24,6 +24,10 @@ export function PickPaletteFile():Promise<string>;
 
 export function Preview(arg1:main.JobRequest,arg2:string):Promise<main.PreviewResult>;
 
+export function PreviewPack(arg1:main.JobRequest,arg2:Array<string>):Promise<main.PreviewResult>;
+
 export function Reveal(arg1:string):Promise<void>;
 
-export function Run(arg1:main.JobRequest,arg2:Array<string>):Promise<void>;
+export function Run(arg1:main.JobRequest,arg2:Array<main.InputFile>):Promise<void>;
+
+export function RunPack(arg1:main.JobRequest,arg2:Array<string>):Promise<main.PackResult>;

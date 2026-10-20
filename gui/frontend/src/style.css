@@ -65,8 +65,8 @@ p { margin: 0; }
 
 /* 상단 */
 .topbar {
-  display: flex; align-items: center; gap: 20px;
-  padding: 0 16px; height: 48px;
+  display: flex; align-items: center; gap: 14px;
+  padding: 0 12px; height: 48px;
   background: var(--panel); border-bottom: 1px solid var(--line);
 }
 .brand { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 14px; white-space: nowrap; }
@@ -79,11 +79,13 @@ p { margin: 0; }
     linear-gradient(var(--fail) 0 0) 12px 0 / 6px 6px no-repeat,
     linear-gradient(var(--accent) 0 0) 0 12px / 6px 6px no-repeat;
 }
-.tabs { display: flex; gap: 4px; height: 100%; }
+.tabs { display: flex; align-items: center; gap: 0; height: 100%; min-width: 0; flex: 1; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
+.tabs::-webkit-scrollbar { display: none; }
+.tab-sep { width: 1px; height: 18px; margin: 0 8px; background: var(--line); flex: none; }
 .tab {
   display: flex; align-items: center; gap: 6px;
-  padding: 0 14px; border: 0; background: none; color: var(--muted);
-  font: inherit; cursor: pointer; border-bottom: 2px solid transparent;
+  padding: 0 9px; height: 100%; border: 0; background: none; color: var(--muted);
+  font: inherit; cursor: pointer; border-bottom: 2px solid transparent; white-space: nowrap; flex: none;
 }
 .tab:hover { color: var(--text); }
 .tab[aria-selected="true"] { color: var(--text); border-bottom-color: var(--accent); font-weight: 600; }
@@ -103,7 +105,10 @@ p { margin: 0; }
 .group[hidden] { display: none; }
 #reduce-threshold, #reduce-count { display: flex; flex-direction: column; gap: 8px; }
 #reduce-threshold[hidden], #reduce-count[hidden] { display: none; }
-#reduce-mode { align-self: flex-start; }
+#reduce-mode, #pack-align { align-self: flex-start; }
+#output-file:not([hidden]), #output-dir:not([hidden]) { display: flex; flex-direction: column; gap: 8px; }
+#export-dir-box[hidden], #suffix-box[hidden], #inplace-radio[hidden], #inplace-warn[hidden] { display: none; }
+#suffix-box { display: flex; flex-direction: column; gap: 6px; }
 details.group summary { cursor: pointer; color: var(--muted); font-weight: 600; font-size: 12px; }
 details.group[open] summary { margin-bottom: 4px; }
 .field-label { font-weight: 600; display: flex; justify-content: space-between; }

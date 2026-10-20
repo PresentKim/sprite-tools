@@ -12,6 +12,10 @@ func TestResolveCommand(t *testing.T) {
 		"downscale": "downscale", "ds": "downscale", "d": "downscale",
 		"index": "index", "ix": "index", "i": "index", "palette": "index",
 		"recolor": "recolor", "rc": "recolor", "rec": "recolor", "palette-convert": "recolor",
+		"upscale": "upscale", "us": "upscale", "up": "upscale",
+		"trim": "trim", "tr": "trim", "t": "trim",
+		"extract": "extract", "ex": "extract", "e": "extract",
+		"pack": "pack", "pk": "pack", "p": "pack",
 		"RD": "reduce",
 	}
 	for in, want := range cases {

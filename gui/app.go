@@ -64,17 +64,36 @@ func (a *App) startup(ctx context.Context) {
 
 // JobRequest: 화면에서 선택한 명령과 옵션입니다.
 type JobRequest struct {
-	Command   string  `json:"command"` // reduce | slice | downscale | index | recolor
+	Command   string  `json:"command"` // reduce | recolor | index | extract | downscale | upscale | trim | slice | pack
 	Threshold float64 `json:"threshold"`
 	MaxColors int     `json:"maxColors"` // reduce: 0 이면 Threshold 사용, 1 이상이면 최대 색상 수 기준
 	Scale     int     `json:"scale"`
 	FrameSize string  `json:"frameSize"`
-	OutDir    string  `json:"outDir"`
+	OutDir    string  `json:"outDir"` // slice: 프레임 폴더, 그 외: 결과를 저장할 폴더 (비어 있으면 원본 옆)
 	KeepEmpty bool    `json:"keepEmpty"`
 	Palette   string  `json:"palette"`
 	Suffix    string  `json:"suffix"`
 	InPlace   bool    `json:"inPlace"`
 	Threads   int     `json:"threads"`
+	Pad       int     `json:"pad"`      // trim: 사방에 더할 투명 여백
+	SaveName  string  `json:"saveName"` // extract: 비어 있지 않으면 공용 팔레트 폴더에도 이 이름으로 저장
+	Force     bool    `json:"force"`    // extract: 같은 이름의 팔레트를 덮어쓰기
+	Cols      int     `json:"cols"`     // pack: 열 수 (0 = 자동)
+	Gap       int     `json:"gap"`      // pack: 칸 사이 간격
+	Align     string  `json:"align"`    // pack: topleft | center
+}
+
+// InputFile: 처리할 파일과, 그 파일을 찾은 루트 폴더(직접 고른 파일이면 빈 값)입니다.
+type InputFile struct {
+	Path string `json:"path"`
+	Root string `json:"root"`
+}
+
+// PackResult: 시트 합치기 결과입니다. 저장 대화상자를 취소하면 Canceled 만 true 입니다.
+type PackResult struct {
+	Canceled bool   `json:"canceled"`
+	Output   string `json:"output"`
+	Message  string `json:"message"`
 }
 
 // FileEntry: 목록에 표시할 입력 파일 정보입니다.
@@ -82,6 +101,7 @@ type FileEntry struct {
 	Path   string `json:"path"`
 	Name   string `json:"name"`
 	Dir    string `json:"dir"`
+	Root   string `json:"root"` // 폴더를 펼쳐 찾은 경우 그 폴더 (출력 폴더에서 하위 구조를 유지하는 데 사용)
 	Width  int    `json:"width"`
 	Height int    `json:"height"`
 	Bytes  int64  `json:"bytes"`
@@ -111,6 +131,9 @@ var defaultSuffixes = map[string]string{
 	"downscale": "-downscaled",
 	"index":     "-indexed",
 	"recolor":   "-recolored",
+	"upscale":   "-upscaled",
+	"trim":      "-trimmed",
+	"extract":   "-palette",
 }
 
 // DefaultSuffix: 명령별 기본 출력 접미사를 반환합니다.
@@ -124,16 +147,20 @@ func (a *App) DefaultSuffix(command string) string {
 func (a *App) ExpandPaths(paths []string, recursive bool) ([]FileEntry, error) {
 	o := common.Options{Roots: paths, Pattern: "*.png", Recursive: recursive, NoOutput: true}
 	o.ExcludeDirs = processor.PaletteDirs()
-	files, err := common.CollectFiles(o)
+	files, err := common.CollectInputs(o)
 	if err != nil {
 		return nil, err
 	}
 	entries := make([]FileEntry, 0, len(files))
 	for _, f := range files {
-		if !strings.EqualFold(filepath.Ext(f), ".png") {
+		if !strings.EqualFold(filepath.Ext(f.Path), ".png") {
 			continue
 		}
-		entries = append(entries, describeFile(f))
+		e := describeFile(f.Path)
+		if f.Root != "" {
+			e.Root = absPath(f.Root)
+		}
+		entries = append(entries, e)
 	}
 	return entries, nil
 }
@@ -147,11 +174,15 @@ func (a *App) Describe(paths []string) []FileEntry {
 	return out
 }
 
-func describeFile(path string) FileEntry {
-	abs, err := filepath.Abs(path)
-	if err == nil {
-		path = abs
+func absPath(path string) string {
+	if abs, err := filepath.Abs(path); err == nil {
+		return abs
 	}
+	return path
+}
+
+func describeFile(path string) FileEntry {
+	path = absPath(path)
 	e := FileEntry{Path: path, Name: filepath.Base(path), Dir: filepath.Dir(path)}
 	f, err := os.Open(path)
 	if err != nil {
@@ -292,6 +323,22 @@ func (a *App) imageFunc(req JobRequest) (func(image.Image) (image.Image, string,
 		return func(src image.Image) (image.Image, string, error) {
 			return processor.DownscaleImage(src, req.Scale)
 		}, nil
+	case "upscale":
+		if req.Scale < processor.MinUpscale || req.Scale > processor.MaxUpscale {
+			return nil, fmt.Errorf("확대 배율은 %d~%d 사이여야 합니다", processor.MinUpscale, processor.MaxUpscale)
+		}
+		return func(src image.Image) (image.Image, string, error) {
+			return processor.UpscaleImage(src, req.Scale)
+		}, nil
+	case "trim":
+		if req.Pad < 0 {
+			return nil, errors.New("여백은 0 이상이어야 합니다")
+		}
+		return func(src image.Image) (image.Image, string, error) {
+			return processor.TrimImage(src, req.Pad)
+		}, nil
+	case "extract":
+		return processor.ExtractPaletteImage, nil
 	case "index":
 		return processor.IndexImage, nil
 	case "recolor":
@@ -323,9 +370,27 @@ func (a *App) buildTask(req JobRequest) (common.Task, common.Options, error) {
 	if err != nil {
 		return nil, o, err
 	}
-	o.Suffix, o.InPlace = req.Suffix, req.InPlace
+	o.Suffix, o.InPlace, o.OutDir = req.Suffix, req.InPlace, strings.TrimSpace(req.OutDir)
+	if req.Command == "extract" {
+		o.InPlace = false // 팔레트 이미지로 원본을 덮어쓰면 안 됩니다.
+	}
 	if err := o.Validate(); err != nil {
 		return nil, o, err
+	}
+	if req.Command == "extract" {
+		saveName := strings.TrimSpace(req.SaveName)
+		if saveName != "" {
+			if _, err := processor.NormalizePaletteName(saveName); err != nil {
+				return nil, o, err
+			}
+		}
+		return func(in, out string) (string, error) {
+			msg, err := processor.Extract(in, out, saveName, req.Force)
+			if err == nil && saveName != "" {
+				a.forgetPalette(saveName)
+			}
+			return msg, err
+		}, o, nil
 	}
 	return func(in, out string) (string, error) {
 		src, err := common.LoadPNG(in)
@@ -344,13 +409,20 @@ func (a *App) buildTask(req JobRequest) (common.Task, common.Options, error) {
 }
 
 // Run: 파일들을 백그라운드에서 처리합니다. 진행 상황은 "job:result", 완료는 "job:done" 이벤트로 전달됩니다.
-func (a *App) Run(req JobRequest, paths []string) error {
-	if len(paths) == 0 {
+func (a *App) Run(req JobRequest, files []InputFile) error {
+	if len(files) == 0 {
 		return errors.New("처리할 파일이 없습니다")
+	}
+	if req.Command == "extract" && strings.TrimSpace(req.SaveName) != "" && len(files) > 1 {
+		return fmt.Errorf("팔레트 목록에 저장은 파일이 하나일 때만 쓸 수 있습니다 (대상 %d개)", len(files))
 	}
 	task, o, err := a.buildTask(req)
 	if err != nil {
 		return err
+	}
+	inputs := make([]common.Input, len(files))
+	for i, f := range files {
+		inputs[i] = common.Input{Path: f.Path, Root: f.Root}
 	}
 
 	a.mu.Lock()
@@ -369,7 +441,7 @@ func (a *App) Run(req JobRequest, paths []string) error {
 			a.mu.Unlock()
 			cancel()
 		}()
-		sum := common.RunFiles(ctx, paths, o, task, func(r common.Result) {
+		sum := common.RunInputs(ctx, inputs, o, task, func(r common.Result) {
 			runtime.EventsEmit(a.ctx, "job:result", r)
 		})
 		runtime.EventsEmit(a.ctx, "job:done", map[string]any{
@@ -463,6 +535,9 @@ func (a *App) preview(req JobRequest, path string) PreviewResult {
 		if dst, msg, err = fn(src); err != nil {
 			return fail(err)
 		}
+		if req.Command == "extract" {
+			dst = swatchStrip(dst)
+		}
 	}
 
 	var buf bytes.Buffer
@@ -481,6 +556,26 @@ func (a *App) preview(req JobRequest, path string) PreviewResult {
 		res.Colors = uniqueColors(dst, 256)
 	}
 	return res
+}
+
+// swatchStrip: 1px 짜리 팔레트 한 줄을 색마다 정사각형 칸으로 키워 한눈에 볼 수 있게 합니다 (한 줄에 최대 16색).
+func swatchStrip(pal image.Image) image.Image {
+	n := common.ToNRGBA(pal)
+	count := n.Rect.Dx()
+	const cell, perRow = 24, 16
+	cols := min(count, perRow)
+	rows := (count + perRow - 1) / perRow
+	dst := image.NewNRGBA(image.Rect(0, 0, cols*cell, rows*cell))
+	for i := 0; i < count; i++ {
+		c := color.NRGBA{n.Pix[i*4], n.Pix[i*4+1], n.Pix[i*4+2], n.Pix[i*4+3]}
+		x0, y0 := (i%perRow)*cell, (i/perRow)*cell
+		for y := 0; y < cell; y++ {
+			for x := 0; x < cell; x++ {
+				dst.SetNRGBA(x0+x, y0+y, c)
+			}
+		}
+	}
+	return dst
 }
 
 // contactSheet: 잘라낸 프레임을 원래 위치에 간격을 두고 배치해 자르기 결과를 한눈에 보여줍니다.
@@ -539,7 +634,82 @@ func hex(c color.NRGBA) string {
 	return fmt.Sprintf("#%02x%02x%02x", c.R, c.G, c.B)
 }
 
+// ---------- 시트 합치기 ----------
+
+func packSheet(req JobRequest, paths []string) (*image.NRGBA, string, error) {
+	if len(paths) == 0 {
+		return nil, "", errors.New("합칠 파일이 없습니다")
+	}
+	images, err := processor.LoadImages(processor.SortedPaths(paths))
+	if err != nil {
+		return nil, "", err
+	}
+	return processor.PackSheet(images, req.Cols, req.Gap, req.Align == "center")
+}
+
+// PreviewPack: 목록의 파일을 자연 정렬 순서로 합친 시트를 저장하지 않고 미리 보여줍니다.
+func (a *App) PreviewPack(req JobRequest, paths []string) PreviewResult {
+	start := time.Now()
+	sheet, msg, err := packSheet(req, paths)
+	if err != nil {
+		return PreviewResult{Status: common.StatusFailed, Message: err.Error(), Millis: time.Since(start).Milliseconds()}
+	}
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, sheet); err != nil {
+		return PreviewResult{Status: common.StatusFailed, Message: err.Error()}
+	}
+	return PreviewResult{
+		Status:  common.StatusDone,
+		Message: msg,
+		Image:   "data:image/png;base64," + base64.StdEncoding.EncodeToString(buf.Bytes()),
+		Width:   sheet.Rect.Dx(),
+		Height:  sheet.Rect.Dy(),
+		Millis:  time.Since(start).Milliseconds(),
+	}
+}
+
+// RunPack: 저장 위치를 물어본 뒤 파일들을 한 장의 시트로 합쳐 저장합니다.
+// 저장 대화상자가 덮어쓰기 여부를 확인하므로 기존 파일은 덮어쓰되, 입력 파일을 덮어쓰는 경로는 거부합니다.
+func (a *App) RunPack(req JobRequest, paths []string) (PackResult, error) {
+	if len(paths) == 0 {
+		return PackResult{}, errors.New("합칠 파일이 없습니다")
+	}
+	sorted := processor.SortedPaths(paths)
+	if _, _, err := packSheet(req, sorted); err != nil {
+		return PackResult{}, err
+	}
+	out, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
+		Title:                "시트 저장",
+		DefaultDirectory:     filepath.Dir(sorted[0]),
+		DefaultFilename:      "sheet.png",
+		Filters:              []runtime.FileFilter{{DisplayName: "PNG 이미지 (*.png)", Pattern: "*.png"}},
+		CanCreateDirectories: true,
+	})
+	if err != nil {
+		return PackResult{}, err
+	}
+	if out == "" {
+		return PackResult{Canceled: true}, nil
+	}
+	if filepath.Ext(out) == "" {
+		out += ".png"
+	}
+	msg, err := processor.PackFiles(sorted, out, req.Cols, req.Gap, req.Align == "center", true)
+	if err != nil {
+		return PackResult{}, err
+	}
+	return PackResult{Output: out, Message: msg}, nil
+}
+
 // ---------- 팔레트 ----------
+
+// forgetPalette: 같은 이름으로 팔레트를 다시 저장했을 때 캐시된 색상이 남지 않게 지웁니다.
+func (a *App) forgetPalette(name string) {
+	name = strings.ToLower(strings.TrimSpace(name))
+	a.palMu.Lock()
+	defer a.palMu.Unlock()
+	delete(a.palettes, name)
+}
 
 // ListPalettes: 로컬에 저장된 팔레트 목록을 색상과 함께 반환합니다.
 func (a *App) ListPalettes() ([]PaletteInfo, error) {
