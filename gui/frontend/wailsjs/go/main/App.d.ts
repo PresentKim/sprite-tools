@@ -12,6 +12,8 @@ export function ExpandPaths(arg1:Array<string>,arg2:boolean):Promise<Array<main.
 
 export function ListPalettes():Promise<Array<main.PaletteInfo>>;
 
+export function LoadImageRGBA(arg1:string):Promise<main.EditorImage>;
+
 export function LoadPalette(arg1:string):Promise<main.PaletteInfo>;
 
 export function PalettesDir():Promise<string>;
@@ -33,3 +35,9 @@ export function Reveal(arg1:string):Promise<void>;
 export function Run(arg1:main.JobRequest,arg2:Array<main.InputFile>):Promise<void>;
 
 export function RunPack(arg1:main.JobRequest,arg2:Array<string>):Promise<main.PackResult>;
+
+export function SaveImageAs(arg1:string,arg2:string,arg3:number,arg4:number,arg5:string,arg6:boolean):Promise<main.SaveResult>;
+
+export function SaveImageRGBA(arg1:string,arg2:number,arg3:number,arg4:string,arg5:boolean):Promise<main.SaveResult>;
+
+export function SetEditorDirty(arg1:boolean):Promise<void>;

@@ -12,7 +12,12 @@
         <span class="brand-mark" aria-hidden="true"></span>
         <span>Sprite Tools</span>
       </div>
+      <div class="seg mode-seg" id="mode-seg" role="tablist" aria-label="작업 모드">
+        <button type="button" data-mode="batch" title="일괄 처리 (Ctrl+1)">일괄 처리</button>
+        <button type="button" data-mode="editor" title="편집기 (Ctrl+2)">편집기<span class="mode-dot" id="mode-dot" hidden>●</span></button>
+      </div>
       <nav class="tabs" id="tabs" role="tablist"></nav>
+      <span class="tabs-spacer" id="tabs-spacer" hidden></span>
       <button class="icon-btn" id="help-btn" title="단축키 도움말 (F1 또는 ?)" aria-label="단축키 도움말">?</button>
     </header>
 
@@ -185,6 +190,7 @@
           <strong class="ellipsis" id="preview-name">미리보기</strong>
           <span class="spacer"></span>
           <div class="seg" id="zoom-seg"></div>
+          <button class="btn ghost small" id="edit-btn" title="이 파일을 편집기에서 열기 (더블클릭)">편집기에서 열기</button>
           <button class="btn ghost small" id="reveal-btn" title="탐색기에서 보기">폴더 열기</button>
         </div>
         <div class="compare">
@@ -206,6 +212,8 @@
       </section>
     </main>
 
+    <div id="editor" hidden></div>
+
     <footer class="statusbar">
       <div class="progress" id="progress"><div class="bar" id="progress-bar"></div></div>
       <span id="status-text">준비됨</span>
@@ -217,11 +225,17 @@
     <div class="toast" id="toast"></div>
 
     <div class="overlay" id="help" hidden>
-      <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="help-title">
+      <div class="dialog help" role="dialog" aria-modal="true" aria-labelledby="help-title">
         <div class="dialog-head">
           <h2 id="help-title">단축키</h2>
           <button class="icon-btn" id="help-close" aria-label="닫기">×</button>
         </div>
+        <h3>공통</h3>
+        <dl class="keys">
+          <dt><kbd>Ctrl</kbd>+<kbd>1</kbd> <kbd>Ctrl</kbd>+<kbd>2</kbd></dt><dd>일괄 처리 / 편집기 전환</dd>
+          <dt><kbd>F1</kbd> <kbd>?</kbd></dt><dd>이 도움말</dd>
+        </dl>
+        <h3>일괄 처리</h3>
         <dl class="keys">
           <dt><kbd>Ctrl</kbd>+<kbd>Enter</kbd></dt><dd>실행</dd>
           <dt><kbd>Esc</kbd></dt><dd>작업 취소 / 닫기 / 필터 지우기</dd>
@@ -229,11 +243,32 @@
           <dt><kbd>↑</kbd> <kbd>↓</kbd></dt><dd>파일 이동</dd>
           <dt><kbd>Delete</kbd></dt><dd>목록에서 제거</dd>
           <dt><kbd>Ctrl</kbd>+<kbd>F</kbd></dt><dd>파일 이름 필터</dd>
+          <dt>더블클릭</dt><dd>파일을 편집기에서 열기 (탐색기에서 보기는 '폴더 열기' 버튼)</dd>
           <dt><kbd>Space</kbd></dt><dd>누르고 있는 동안 원본 보기 (결과 창을 마우스로 눌러도 됨)</dd>
           <dt><kbd>Ctrl</kbd>+휠</dt><dd>미리보기 확대/축소</dd>
-          <dt><kbd>F1</kbd> <kbd>?</kbd></dt><dd>이 도움말</dd>
         </dl>
         <p class="muted small">미리보기에 마우스를 올리면 픽셀 좌표와 색상이 캡션에 표시됩니다.</p>
+        <h3>편집기 — 도구</h3>
+        <dl class="keys">
+          <dt><kbd>B</kbd> <kbd>E</kbd> <kbd>G</kbd> <kbd>I</kbd></dt><dd>연필 · 지우개 · 채우기 · 스포이트</dd>
+          <dt><kbd>L</kbd> <kbd>U</kbd> <kbd>Shift</kbd>+<kbd>U</kbd></dt><dd>선 · 사각형 · 타원</dd>
+          <dt><kbd>Alt</kbd>+클릭</dt><dd>스포이트 (어느 도구에서나)</dd>
+          <dt><kbd>Shift</kbd></dt><dd>선: 0/45/90° 고정 · 사각형/타원: 정사각형/원 (그리는 중에 누름)</dd>
+          <dt><kbd>X</kbd></dt><dd>주 색 ↔ 보조 색 (왼쪽 버튼 = 주 색, 오른쪽 버튼 = 보조 색)</dd>
+          <dt><kbd>[</kbd> <kbd>]</kbd></dt><dd>브러시 크기 줄이기 / 키우기</dd>
+          <dt><kbd>Esc</kbd></dt><dd>그리는 중인 선·도형 취소</dd>
+        </dl>
+        <h3>편집기 — 보기·파일</h3>
+        <dl class="keys">
+          <dt><kbd>Ctrl</kbd>+휠 · <kbd>+</kbd> <kbd>-</kbd></dt><dd>확대/축소 (커서 위치 기준)</dd>
+          <dt><kbd>0</kbd> · <kbd>1</kbd></dt><dd>화면에 맞춤 · 100%</dd>
+          <dt><kbd>Space</kbd>+드래그 · 휠클릭 드래그</dt><dd>화면 이동 (휠: 세로, <kbd>Shift</kbd>+휠: 가로)</dd>
+          <dt><kbd>Ctrl</kbd>+<kbd>'</kbd> · <kbd>#</kbd></dt><dd>픽셀 격자 켜기/끄기 (4배 이상)</dd>
+          <dt><kbd>Ctrl</kbd>+<kbd>Z</kbd></dt><dd>실행 취소</dd>
+          <dt><kbd>Ctrl</kbd>+<kbd>Y</kbd> <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd></dt><dd>다시 실행</dd>
+          <dt><kbd>Ctrl</kbd>+<kbd>S</kbd> <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd></dt><dd>저장 · 다른 이름으로 저장</dd>
+          <dt><kbd>Ctrl</kbd>+<kbd>O</kbd> <kbd>Ctrl</kbd>+<kbd>N</kbd></dt><dd>열기 · 새로 만들기</dd>
+        </dl>
       </div>
     </div>
   </div>

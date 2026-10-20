@@ -198,3 +198,22 @@ func TestRestoreBackupRejectsOtherDestination(t *testing.T) {
 		t.Errorf("원래 위치로의 복원은 허용되어야 합니다: %v", err)
 	}
 }
+
+func TestBackupFileNow(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "a.png")
+	writeFile(t, p, "old")
+	b, err := BackupFileNow(p)
+	if err != nil || b == "" {
+		t.Fatalf("백업 실패: %q %v", b, err)
+	}
+	if filepath.Base(filepath.Dir(filepath.Dir(b))) != BackupDirName || filepath.Base(b) != "a.png" {
+		t.Errorf("백업 위치가 예상과 다릅니다: %s", b)
+	}
+	if got := readFile(t, b); got != "old" {
+		t.Errorf("백업 내용 = %q", got)
+	}
+	if b, err := BackupFileNow(filepath.Join(dir, "none.png")); err != nil || b != "" {
+		t.Errorf("없는 파일은 빈 경로여야 합니다: %q %v", b, err)
+	}
+}

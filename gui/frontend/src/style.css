@@ -326,3 +326,8 @@ kbd {
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-thumb { background: var(--line); border-radius: 5px; border: 2px solid var(--panel); }
 ::-webkit-scrollbar-corner { background: transparent; }
+
+/* 도움말은 내용이 길어 넓게, 넘치면 스크롤 */
+.dialog.help { width: min(640px, calc(100vw - 48px)); max-height: calc(100vh - 56px); overflow-y: auto; gap: 8px; }
+.dialog.help h3 { margin: 6px 0 0; }
+.dialog.help .keys { gap: 6px 16px; }

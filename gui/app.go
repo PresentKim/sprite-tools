@@ -17,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
@@ -38,6 +39,8 @@ type App struct {
 	srcMu    sync.Mutex
 	srcCache map[string]cachedImage
 	srcOrder []string
+
+	editorDirty atomic.Bool // 편집기에 저장하지 않은 변경이 있는지
 }
 
 type loadedPalette struct {

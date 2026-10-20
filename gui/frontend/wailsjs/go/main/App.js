@@ -22,6 +22,10 @@ export function ListPalettes() {
   return window['go']['main']['App']['ListPalettes']();
 }
 
+export function LoadImageRGBA(arg1) {
+  return window['go']['main']['App']['LoadImageRGBA'](arg1);
+}
+
 export function LoadPalette(arg1) {
   return window['go']['main']['App']['LoadPalette'](arg1);
 }
@@ -64,4 +68,16 @@ export function Run(arg1, arg2) {
 
 export function RunPack(arg1, arg2) {
   return window['go']['main']['App']['RunPack'](arg1, arg2);
+}
+
+export function SaveImageAs(arg1, arg2, arg3, arg4, arg5, arg6) {
+  return window['go']['main']['App']['SaveImageAs'](arg1, arg2, arg3, arg4, arg5, arg6);
+}
+
+export function SaveImageRGBA(arg1, arg2, arg3, arg4, arg5) {
+  return window['go']['main']['App']['SaveImageRGBA'](arg1, arg2, arg3, arg4, arg5);
+}
+
+export function SetEditorDirty(arg1) {
+  return window['go']['main']['App']['SetEditorDirty'](arg1);
 }

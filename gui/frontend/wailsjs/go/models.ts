@@ -14,6 +14,28 @@ export namespace main {
 	        this.backup = source["backup"];
 	    }
 	}
+	export class EditorImage {
+	    path: string;
+	    width: number;
+	    height: number;
+	    pixels: string;
+	    indexed: boolean;
+	    colors: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new EditorImage(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.path = source["path"];
+	        this.width = source["width"];
+	        this.height = source["height"];
+	        this.pixels = source["pixels"];
+	        this.indexed = source["indexed"];
+	        this.colors = source["colors"];
+	    }
+	}
 	export class FileEntry {
 	    path: string;
 	    name: string;
@@ -168,6 +190,28 @@ export namespace main {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.restored = source["restored"];
 	        this.errors = source["errors"];
+	    }
+	}
+	export class SaveResult {
+	    canceled: boolean;
+	    path: string;
+	    format: string;
+	    colors: number;
+	    backup: string;
+	    bytes: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new SaveResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.canceled = source["canceled"];
+	        this.path = source["path"];
+	        this.format = source["format"];
+	        this.colors = source["colors"];
+	        this.backup = source["backup"];
+	        this.bytes = source["bytes"];
 	    }
 	}
 

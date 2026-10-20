@@ -470,3 +470,9 @@ func runTask(task Task, in, out string) (msg string, err error) {
 	}()
 	return task(in, out)
 }
+
+// BackupFileNow: 파일 하나를 현재 시각 이름의 백업 폴더(<폴더>/BackupDirName/<시각>/<이름>)로 복사하고 그 경로를 반환합니다.
+// 원본이 없으면 복사할 것이 없으므로 빈 경로와 nil 을 돌려줍니다.
+func BackupFileNow(path string) (string, error) {
+	return backupFile(path, time.Now().Format(backupStampLayout))
+}

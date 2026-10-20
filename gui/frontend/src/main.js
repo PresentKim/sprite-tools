@@ -1,9 +1,10 @@
 import './style.css';
 import {
   Cancel, DefaultSuffix, Describe, ExpandPaths, ListPalettes, LoadPalette,
-  PickFiles, PickFolder, PickPaletteFile, Preview, PreviewPack, RestoreBackups, Reveal, Run, RunPack,
+  PickFiles, PickFolder, PickPaletteFile, Preview, PreviewPack, RestoreBackups, Reveal, Run, RunPack, SetEditorDirty,
 } from '../wailsjs/go/main/App';
 import { BrowserOpenURL, EventsOn, OnFileDrop } from '../wailsjs/runtime/runtime';
+import { createEditor } from './editor/editor.js';
 
 // out: 결과를 저장하는 방식 — file(접미사/다른 폴더/덮어쓰기), extract(덮어쓰기 제외), slice(프레임 폴더), pack(저장 시 파일 선택)
 // 순서가 Alt+1..9 단축키 순서이고, group 이 바뀌는 곳에 탭 구분선이 들어갑니다.
@@ -56,6 +57,7 @@ const defaults = {
   threads: 0,
   recursive: true,
   zoom: 'fit',
+  mode: 'batch', // batch | editor — 마지막으로 쓴 모드
 };
 const settings = loadSettings();
 const state = {
@@ -328,6 +330,7 @@ function initOptions() {
   renderZoom();
 
   $('reveal-btn').onclick = () => { const f = selectedFile(); if (f) Reveal(f.path); };
+  $('edit-btn').onclick = () => { const f = selectedFile(); if (f && !f.error) openInEditor(f.path); };
 }
 
 function renderZoom() {
@@ -479,7 +482,7 @@ function fileRow(f) {
 
   row.append(thumb, main, badge, rm);
   row.onclick = () => select(f.path);
-  row.ondblclick = () => Reveal(f.path);
+  row.ondblclick = () => { if (!f.error) openInEditor(f.path); };
   return row;
 }
 
@@ -529,6 +532,7 @@ async function runPreview() {
   const msg = $('result-msg');
 
   $('reveal-btn').disabled = !f;
+  $('edit-btn').disabled = !f || !!f.error;
   if (!f || (packing && !valid.length)) {
     $('preview-name').textContent = '미리보기';
     origImg.hidden = resImg.hidden = true;
@@ -1002,7 +1006,14 @@ function initGlobal() {
   window.addEventListener('dragleave', () => { if (--depth <= 0) { depth = 0; overlay.classList.remove('on'); } });
   window.addEventListener('dragover', (e) => e.preventDefault());
   window.addEventListener('drop', (e) => { e.preventDefault(); depth = 0; overlay.classList.remove('on'); });
-  OnFileDrop((_x, _y, paths) => { depth = 0; overlay.classList.remove('on'); addPaths(paths); }, false);
+  OnFileDrop((_x, _y, paths) => {
+    depth = 0;
+    overlay.classList.remove('on');
+    if (settings.mode !== 'editor') { addPaths(paths); return; }
+    const png = (paths || []).find((p) => p.toLowerCase().endsWith('.png'));
+    if (png) editor.open(png);
+    else toast('PNG 파일만 편집기에서 열 수 있습니다', 'failed');
+  }, false);
 
   window.addEventListener('keydown', (e) => {
     const active = document.activeElement;
@@ -1013,6 +1024,8 @@ function initGlobal() {
     if (e.key === 'Escape' && !$('help').hidden) { toggleHelp(false); return; }
     if (e.key === 'F1' || (e.key === '?' && !entering)) { e.preventDefault(); toggleHelp(); return; }
     if (!$('help').hidden) return; // 도움말이 열려 있으면 다른 단축키는 막음
+    if (e.ctrlKey && !e.altKey && (e.key === '1' || e.key === '2')) { e.preventDefault(); setMode(e.key === '1' ? 'batch' : 'editor'); return; }
+    if (settings.mode === 'editor') return; // 편집기 단축키는 편집기가 처리
     if (e.ctrlKey && e.key.toLowerCase() === 'f') { e.preventDefault(); $('file-filter').focus(); $('file-filter').select(); return; }
     if (e.ctrlKey && e.key === 'Enter') { e.preventDefault(); startRun(); return; }
     if (e.key === 'Escape' && state.running) { Cancel(); return; }
@@ -1041,10 +1054,69 @@ function initGlobal() {
   initPreviewInteraction();
 }
 
+// ---------- 편집기 연결 ----------
+
+const normPath = (p) => p.toLowerCase().split('\\').join('/');
+
+const editor = createEditor($('editor'), {
+  toast,
+  isBlocked: () => !$('help').hidden,
+  getBackup: () => settings.backup,
+  setBackup: (on) => { settings.backup = on; saveSettings(); renderOutput(); },
+  onDirtyChange: (dirty) => {
+    $('mode-dot').hidden = !dirty;
+    SetEditorDirty(dirty).catch(() => {});
+  },
+  // 저장한 파일이 목록에 있으면 크기·썸네일·미리보기를 새로 읽고, 없으면 목록에 추가할 수 있게 합니다.
+  onSaved: (path) => {
+    const f = state.files.find((x) => normPath(x.path) === normPath(path));
+    const actions = [{ label: '폴더 열기', run: () => Reveal(path) }];
+    if (f) {
+      Describe([path]).then(([e]) => {
+        Object.assign(f, e, { root: f.root, v: Date.now(), status: '', message: '' });
+        renderFiles();
+        schedulePreview();
+      });
+    } else {
+      actions.unshift({ label: '목록에 추가', run: () => addPaths([path]) });
+    }
+    return actions;
+  },
+});
+
+function applyMode() {
+  const ed = settings.mode === 'editor';
+  document.querySelector('.layout').hidden = ed;
+  $('tabs').hidden = ed;
+  $('tabs-spacer').hidden = !ed;
+  $('editor').hidden = !ed;
+  $('mode-seg').querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.mode === settings.mode));
+  editor.activate(ed);
+}
+
+function setMode(mode) {
+  if (settings.mode === mode) return;
+  settings.mode = mode;
+  saveSettings();
+  applyMode();
+}
+
+async function openInEditor(path) {
+  setMode('editor');
+  await editor.open(path);
+}
+
+function initMode() {
+  if (settings.mode !== 'editor') settings.mode = 'batch';
+  $('mode-seg').querySelectorAll('button').forEach((b) => { b.onclick = () => { setMode(b.dataset.mode); b.blur(); }; });
+  applyMode();
+}
+
 // ---------- 시작 ----------
 
 initOptions();
 initGlobal();
-if (import.meta.env.DEV) window.__addPaths = addPaths; // 개발 모드(브라우저)에서 드롭 대신 사용
+initMode();
+if (import.meta.env.DEV) { window.__addPaths = addPaths; window.__editor = editor; } // 개발 모드(브라우저)에서 드롭 대신 사용
 renderFiles();
 setCommand(COMMANDS.some((c) => c.id === settings.command) ? settings.command : 'reduce');
