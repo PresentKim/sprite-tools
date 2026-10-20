@@ -14,7 +14,8 @@ import * as Sel from './selection.js';
 import { createStrip, visibleList } from './strip.js';
 import { createTabs } from './tabs.js';
 import * as T from './tools.js';
-import { el, isModalOpen, modal } from './ui.js';
+import { t as tr, tn } from '../i18n/index.js';
+import { el, isModalOpen, localized, modal, relabel } from './ui.js';
 
 const ZOOMS = [0.125, 0.25, 0.5, 1, 2, 3, 4, 5, 6, 8, 10, 12, 16, 20, 24, 32, 40, 48, 64];
 const TILES = [0, 8, 16, 32, 64];
@@ -47,18 +48,20 @@ function icon(name) {
   return s;
 }
 
+// Tool names and extra tooltip text live in the catalogs: editor.tool.<id> and, when extra is set, editor.tool.<id>.extra.
 const TOOLS = [
-  { id: 'pencil', label: '연필', key: 'B' },
-  { id: 'eraser', label: '지우개', key: 'E' },
-  { id: 'fill', label: '채우기', key: 'G' },
-  { id: 'picker', label: '스포이트', key: 'I', extra: 'Alt+클릭으로 어느 도구에서나' },
-  { id: 'line', label: '선', key: 'L', extra: 'Shift: 0/45/90° 고정' },
-  { id: 'rect', label: '사각형', key: 'U', extra: 'Shift: 정사각형' },
-  { id: 'ellipse', label: '타원', key: 'Shift+U', extra: 'Shift: 원' },
-  { id: 'select', label: '사각형 선택', key: 'M', extra: 'Shift: 더하기 · Alt: 빼기 · 선택 안쪽을 끌면 이동', group: 1 },
-  { id: 'wand', label: '마법봉', key: 'W', extra: '클릭한 곳과 같은 색 영역 선택 · Shift: 더하기 · Alt: 빼기', group: 1 },
-  { id: 'move', label: '이동', key: 'V', extra: '선택 영역(없으면 전체)의 픽셀을 끌어 옮김 · 방향키: 1px, Shift+방향키: 10px', group: 1 },
+  { id: 'pencil', key: 'B' },
+  { id: 'eraser', key: 'E' },
+  { id: 'fill', key: 'G' },
+  { id: 'picker', key: 'I', extra: true },
+  { id: 'line', key: 'L', extra: true },
+  { id: 'rect', key: 'U', extra: true },
+  { id: 'ellipse', key: 'Shift+U', extra: true },
+  { id: 'select', key: 'M', extra: true, group: 1 },
+  { id: 'wand', key: 'W', extra: true, group: 1 },
+  { id: 'move', key: 'V', extra: true, group: 1 },
 ];
+const toolTip = (tool) => `${tr(`editor.tool.${tool.id}`)} (${tool.key})${tool.extra ? ` — ${tr(`editor.tool.${tool.id}.extra`)}` : ''}`;
 const SELECT_TOOLS = ['select', 'move'];
 
 const defaultPrefs = {
@@ -125,12 +128,21 @@ export function createEditor(host, hooks) {
   // ---------- 화면 구성 ----------
 
   const R = {}; // 자주 쓰는 요소
+  let saveAllCount = 0; // number of unsaved documents, shown on the "Save all" button
+  const saveAllLabel = () => (saveAllCount > 1 ? tr('editor.save_all_n', { n: saveAllCount }) : tr('editor.save_all'));
+  // content / title: a string or element as-is, or a function returning text (re-applied on every language change).
   const mkBtn = (cls, content, title, onclick) => {
     const b = el('button', cls);
-    if (typeof content === 'string') b.textContent = content;
-    else b.append(content);
     b.type = 'button';
-    if (title) { b.title = title; b.setAttribute('aria-label', title); }
+    if (content instanceof Node) b.append(content);
+    const apply = () => {
+      if (typeof content === 'function') b.textContent = content();
+      else if (typeof content === 'string') b.textContent = content;
+      const tip = typeof title === 'function' ? title() : title;
+      if (tip) { b.title = tip; b.setAttribute('aria-label', tip); }
+    };
+    if (typeof content === 'function' || typeof title === 'function') localized(apply);
+    else apply();
     b.onclick = (e) => { onclick(e); b.blur(); };
     return b;
   };
@@ -138,27 +150,30 @@ export function createEditor(host, hooks) {
 
   function buildTop() {
     const top = el('div', 'ed-top');
-    R.open = mkBtn('btn small', '열기…', '파일 열기 (Ctrl+O)', () => openDialog());
-    R.new = mkBtn('btn small', '새로 만들기', '새 이미지 (Ctrl+N)', () => newDialog());
-    R.save = mkBtn('btn small primary', '저장', '저장 (Ctrl+S)', () => save(false));
-    R.saveAs = mkBtn('btn small', '다른 이름으로', '다른 이름으로 저장 (Ctrl+Shift+S)', () => save(true));
-    R.saveAll = mkBtn('btn small', '모두 저장', '저장하지 않은 문서를 모두 저장 (Ctrl+Alt+S) — 경로가 없는 새 문서는 건너뜁니다', () => saveAll());
-    R.undo = mkBtn('btn small', '↶', '실행 취소 (Ctrl+Z)', () => undo());
-    R.redo = mkBtn('btn small', '↷', '다시 실행 (Ctrl+Y / Ctrl+Shift+Z)', () => redo());
-    R.zoomOut = mkBtn('btn small', '−', '축소 (-)', () => zoomStep(-1));
+    R.open = mkBtn('btn small', () => tr('editor.open'), () => tr('editor.open.title'), () => openDialog());
+    R.new = mkBtn('btn small', () => tr('editor.new'), () => tr('editor.new.title'), () => newDialog());
+    R.save = mkBtn('btn small primary', () => tr('editor.save'), () => tr('editor.save.title'), () => save(false));
+    R.saveAs = mkBtn('btn small', () => tr('editor.save_as'), () => tr('editor.save_as.title'), () => save(true));
+    R.saveAll = mkBtn('btn small', () => saveAllLabel(), () => tr('editor.save_all.title'), () => saveAll());
+    R.undo = mkBtn('btn small', '↶', () => tr('editor.undo.title'), () => undo());
+    R.redo = mkBtn('btn small', '↷', () => tr('editor.redo.title'), () => redo());
+    R.zoomOut = mkBtn('btn small', '−', () => tr('editor.zoom_out.title'), () => zoomStep(-1));
     R.zoomLabel = el('span', 'ed-zoom', '100%');
-    R.zoomLabel.title = 'Ctrl+휠로 확대/축소';
-    R.zoomIn = mkBtn('btn small', '+', '확대 (+)', () => zoomStep(1));
-    R.fit = mkBtn('btn small', '맞춤', '화면에 맞춤 (0)', () => fit());
-    R.one = mkBtn('btn small', '1:1', '100% (1)', () => zoomTo(1));
-    R.grid = mkBtn('btn small ed-toggle', icon('grid'), '픽셀 격자 (Ctrl+\' 또는 #) — 4배 이상 확대에서 보임', () => { P.grid = !P.grid; savePrefs(); syncTop(); render(); });
+    localized(() => { R.zoomLabel.title = tr('editor.zoom_label.title'); });
+    R.zoomIn = mkBtn('btn small', '+', () => tr('editor.zoom_in.title'), () => zoomStep(1));
+    R.fit = mkBtn('btn small', () => tr('editor.fit'), () => tr('editor.fit.title'), () => fit());
+    R.one = mkBtn('btn small', '1:1', () => tr('editor.one.title'), () => zoomTo(1));
+    R.grid = mkBtn('btn small ed-toggle', icon('grid'), () => tr('editor.grid.title'), () => { P.grid = !P.grid; savePrefs(); syncTop(); render(); });
     R.tile = el('select', 'ed-tile');
-    R.tile.title = '타일 격자 간격 (px)';
-    TILES.forEach((t) => R.tile.append(new Option(t ? `타일 ${t}` : '타일 없음', t)));
+    localized(() => {
+      R.tile.title = tr('editor.tile.title');
+      R.tile.replaceChildren(...TILES.map((n) => new Option(n ? tr('editor.tile.option', { n }) : tr('editor.tile.none'), n)));
+      R.tile.value = String(P.tile);
+    });
     R.tile.onchange = () => { P.tile = Number(R.tile.value); savePrefs(); render(); R.tile.blur(); };
-    R.menuEdit = mkBtn('btn small ed-menubtn', '편집 ▾', '복사·붙여넣기·선택', (e) => toggleMenu(R.menuEdit, editMenu));
-    R.menuImage = mkBtn('btn small ed-menubtn', '이미지 ▾', '뒤집기·회전·캔버스 크기·자르기', () => toggleMenu(R.menuImage, imageMenu));
-    R.menuFx = mkBtn('btn small ed-menubtn', '효과 ▾', '일괄 처리 기능을 현재 이미지에 적용', () => toggleMenu(R.menuFx, fxMenu));
+    R.menuEdit = mkBtn('btn small ed-menubtn', () => tr('editor.menu.edit'), () => tr('editor.menu.edit.title'), (e) => toggleMenu(R.menuEdit, editMenu));
+    R.menuImage = mkBtn('btn small ed-menubtn', () => tr('editor.menu.image'), () => tr('editor.menu.image.title'), () => toggleMenu(R.menuImage, imageMenu));
+    R.menuFx = mkBtn('btn small ed-menubtn', () => tr('editor.menu.fx'), () => tr('editor.menu.fx.title'), () => toggleMenu(R.menuFx, fxMenu));
     top.append(R.open, R.new, sep(), R.save, R.saveAs, R.saveAll, sep(), R.undo, R.redo, sep(),
       R.menuEdit, R.menuImage, R.menuFx, el('span', 'spacer'), R.zoomOut, R.zoomLabel, R.zoomIn, R.fit, R.one, sep(), R.grid, R.tile);
     return top;
@@ -170,13 +185,13 @@ export function createEditor(host, hooks) {
     let group = 0;
     for (const t of TOOLS) {
       if ((t.group || 0) !== group) { group = t.group || 0; bar.append(el('span', 'ed-tools-sep')); }
-      const b = mkBtn('ed-tool', icon(t.id), `${t.label} (${t.key})${t.extra ? ` — ${t.extra}` : ''}`, () => setTool(t.id));
+      const b = mkBtn('ed-tool', icon(t.id), () => toolTip(t), () => setTool(t.id));
       R.toolBtns[t.id] = b;
       bar.append(b);
     }
     bar.append(el('span', 'ed-tools-sep'));
-    R.symX = mkBtn('ed-tool', icon('symx'), '가로 대칭 그리기 — 가운데 세로축 기준 좌우 반사 (연필·지우개·선·도형)', () => { P.symX = !P.symX; savePrefs(); syncTools(); updateCursor(); });
-    R.symY = mkBtn('ed-tool', icon('symy'), '세로 대칭 그리기 — 가운데 가로축 기준 위아래 반사 (연필·지우개·선·도형)', () => { P.symY = !P.symY; savePrefs(); syncTools(); updateCursor(); });
+    R.symX = mkBtn('ed-tool', icon('symx'), () => tr('editor.sym_x.title'), () => { P.symX = !P.symX; savePrefs(); syncTools(); updateCursor(); });
+    R.symY = mkBtn('ed-tool', icon('symy'), () => tr('editor.sym_y.title'), () => { P.symY = !P.symY; savePrefs(); syncTools(); updateCursor(); });
     bar.append(R.symX, R.symY);
     return bar;
   }
@@ -193,13 +208,15 @@ export function createEditor(host, hooks) {
     R.main = el('canvas', 'ed-canvas');
     R.over = el('canvas', 'ed-canvas ed-over');
     R.empty = el('div', 'ed-empty');
-    R.empty.append(
-      el('div', 'empty-art'),
-      el('p', '', 'PNG 파일을 열거나 새 이미지를 만드세요'),
-      el('p', 'muted small', '왼쪽 파일 띠에서 고르거나, 일괄 처리 목록에서 더블클릭하거나, 파일·폴더를 끌어다 놓아도 됩니다'),
-    );
+    const emptyTitle = el('p');
+    const emptyHint = el('p', 'muted small');
+    localized(() => {
+      emptyTitle.textContent = tr('editor.empty.title');
+      emptyHint.textContent = tr('editor.empty.hint');
+    });
+    R.empty.append(el('div', 'empty-art'), emptyTitle, emptyHint);
     const row = el('div', 'row');
-    row.append(mkBtn('btn', '열기…', '', () => openDialog()), mkBtn('btn', '새로 만들기', '', () => newDialog()));
+    row.append(mkBtn('btn', () => tr('editor.open'), '', () => openDialog()), mkBtn('btn', () => tr('editor.new'), '', () => newDialog()));
     R.empty.append(row);
     R.view.append(R.main, R.over, R.empty);
 
@@ -213,10 +230,18 @@ export function createEditor(host, hooks) {
     return c;
   }
 
-  function section(title) {
+  // title: a catalog key; the heading is re-translated on every language change.
+  function section(titleKey) {
     const s = el('section', 'ed-section');
-    s.append(el('h3', '', title));
+    const h = el('h3');
+    localized(() => { h.textContent = tr(titleKey); });
+    s.append(h);
     return s;
+  }
+
+  // The swatch tooltip shows the slot's name and the current color: "<name> — click to choose a color [#hex]".
+  function swatchTitle(slot) {
+    return tr('editor.color.swatch_title', { tip: tr(slot === 'primary' ? 'editor.color.primary' : 'editor.color.secondary'), hex: toHex(P[slot]) });
   }
 
   function buildSide() {
@@ -224,30 +249,32 @@ export function createEditor(host, hooks) {
     R.side = side;
 
     // 색상
-    const colors = section('색상');
+    const colors = section('editor.section.colors');
     const sw = el('div', 'ed-swatches');
     R.secSw = el('button', 'ed-sw ed-sw-sec');
     R.priSw = el('button', 'ed-sw ed-sw-pri');
-    for (const [b, slot, tip] of [[R.secSw, 'secondary', '보조 색 (오른쪽 버튼)'], [R.priSw, 'primary', '주 색 (왼쪽 버튼)']]) {
+    for (const [b, slot] of [[R.secSw, 'secondary'], [R.priSw, 'primary']]) {
       b.type = 'button';
-      b.title = `${tip} — 눌러서 색 고르기`;
       b.append(el('i'));
       b.onclick = () => { openPicker(slot); b.blur(); };
     }
-    R.swap = mkBtn('ed-swap', icon('swap'), '주 색 ↔ 보조 색 (X)', () => swapColors());
+    R.swap = mkBtn('ed-swap', icon('swap'), () => tr('editor.color.swap.title'), () => swapColors());
     sw.append(R.secSw, R.priSw, R.swap);
     R.recent = el('div', 'ed-recent');
-    const rl = el('div', 'ed-label muted small', '최근 색');
-    rl.title = '클릭: 주 색 · 오른쪽 클릭: 보조 색';
+    const rl = el('div', 'ed-label muted small');
+    localized(() => {
+      rl.textContent = tr('editor.color.recent');
+      rl.title = tr('editor.color.recent.title');
+    });
     colors.append(sw, rl, R.recent);
 
     // 도구 옵션
-    R.optSec = section('도구 옵션');
+    R.optSec = section('editor.section.options');
     R.opts = el('div', 'ed-opts');
     R.optSec.append(R.opts);
 
-    // 효과 미리보기 (효과 메뉴를 고르면 맨 위에 나타남)
-    R.fxSec = section('효과');
+    // 효과 미리보기 (효과 메뉴를 고르면 맨 위에 나타남; 제목은 효과를 열 때 다시 채워집니다)
+    R.fxSec = section('editor.section.fx');
     R.fxSec.classList.add('ed-fx');
     R.fxSec.hidden = true;
 
@@ -255,21 +282,25 @@ export function createEditor(host, hooks) {
     const pal = buildPalette();
 
     // 내비게이터
-    const nav = section('내비게이터');
+    const nav = section('editor.section.navigator');
     R.nav = el('canvas', 'ed-nav');
     R.navBox = el('div', 'ed-nav-box');
     R.navBox.append(R.nav);
     nav.append(R.navBox);
 
     // 이미지 정보
-    const info = section('이미지 정보');
+    const info = section('editor.section.info');
     R.info = el('dl', 'ed-info');
     R.backup = el('input');
     R.backup.type = 'checkbox';
     R.backup.onchange = () => hooks.setBackup(R.backup.checked);
     const bl = el('label', 'check small');
-    bl.title = '기존 파일을 덮어쓰기 전에 원본을 같은 폴더의 .sprite-tools-backup 에 복사해 둡니다';
-    bl.append(R.backup, ' 덮어쓰기 전에 원본 백업');
+    const blText = el('span');
+    localized(() => {
+      bl.title = tr('editor.backup.title');
+      blText.textContent = tr('editor.backup');
+    });
+    bl.append(R.backup, ' ', blText);
     info.append(R.info, bl);
 
     side.append(R.fxSec, colors, R.optSec, pal, nav, info);
@@ -305,7 +336,8 @@ export function createEditor(host, hooks) {
     for (const b of [R.save, R.saveAs, R.zoomOut, R.zoomIn, R.fit, R.one, R.grid, R.tile, R.menuEdit, R.menuImage, R.menuFx]) b.disabled = !d;
     const nd = dirtyDocs().length;
     R.saveAll.disabled = nd === 0 || !!S.fx;
-    R.saveAll.textContent = nd > 1 ? `모두 저장 (${nd})` : '모두 저장';
+    saveAllCount = nd;
+    R.saveAll.textContent = saveAllLabel();
     R.undo.disabled = !d || !d.history.canUndo || !!S.fx;
     R.redo.disabled = !d || !d.history.canRedo || !!S.fx;
     R.grid.classList.toggle('on', P.grid);
@@ -319,36 +351,24 @@ export function createEditor(host, hooks) {
     for (const t of TOOLS) R.toolBtns[t.id].classList.toggle('on', P.tool === t.id);
     R.symX.classList.toggle('on', P.symX);
     R.symY.classList.toggle('on', P.symY);
-    const hints = {
-      pencil: '왼쪽: 주 색 · 오른쪽: 보조 색 · Alt+클릭: 스포이트',
-      eraser: '왼쪽·오른쪽 버튼 모두 지웁니다',
-      fill: '클릭한 곳의 같은 색을 주 색(오른쪽: 보조 색)으로 채웁니다 · Alt+클릭: 스포이트',
-      picker: '왼쪽: 주 색으로 · 오른쪽: 보조 색으로',
-      line: '드래그 · Shift: 0/45/90° 고정 · Esc: 취소',
-      rect: '드래그 · Shift: 정사각형 · Esc: 취소',
-      ellipse: '드래그 · Shift: 원 · Esc: 취소',
-      select: '드래그: 선택 · Shift: 더하기 · Alt: 빼기 · 선택 안쪽 드래그: 이동 · 빈 곳 클릭: 해제 · Ctrl+A/D/Shift+I',
-      wand: '클릭: 같은 색 영역 선택 · Shift: 더하기 · Alt: 빼기 · 빈 곳 클릭: 해제 · Delete: 선택 지우기',
-      move: '드래그: 선택 영역(없으면 전체) 이동 · 방향키 1px (Shift 10px) · Enter: 확정 · Esc: 취소',
-    };
     R.view.dataset.tool = P.tool;
-    R.hint.textContent = hints[P.tool] || '';
+    R.hint.textContent = tr(`editor.hint.${P.tool}`);
     renderOptions();
   }
 
-  function renderSwatch(btn, c) {
-    btn.firstChild.style.setProperty('--c', css(c));
-    btn.title = btn.title.replace(/ \[.*\]$/, '') + ` [${toHex(c)}]`;
+  function renderSwatch(btn, slot) {
+    btn.firstChild.style.setProperty('--c', css(P[slot]));
+    btn.title = swatchTitle(slot);
   }
 
   function syncColors() {
-    renderSwatch(R.priSw, P.primary);
-    renderSwatch(R.secSw, P.secondary);
+    renderSwatch(R.priSw, 'primary');
+    renderSwatch(R.secSw, 'secondary');
     R.recent.replaceChildren(...P.recent.map((c) => {
       const b = el('button', 'ed-recent-sw');
       b.type = 'button';
       b.style.setProperty('--c', css(c));
-      b.title = `${toHex(c)} — 클릭: 주 색, 오른쪽 클릭: 보조 색`;
+      b.title = tr('editor.color.click_hint', { hex: toHex(c) });
       b.onclick = () => { setColor('primary', c); b.blur(); };
       b.oncontextmenu = (e) => { e.preventDefault(); setColor('secondary', c); };
       return b;
@@ -418,7 +438,7 @@ export function createEditor(host, hooks) {
     const v = el('span', 'value', String(P.tolerance));
     r.oninput = () => { P.tolerance = Number(r.value); v.textContent = r.value; savePrefs(); };
     tol.append(r, v);
-    return optRow('허용 오차 (0 = 정확히 같은 색)', tol);
+    return optRow(tr('editor.opt.tolerance'), tol);
   }
 
   function renderOptions() {
@@ -427,31 +447,31 @@ export function createEditor(host, hooks) {
     const t = P.tool;
     const brush = t === 'pencil' || t === 'eraser' || t === 'line' || ((t === 'rect' || t === 'ellipse') && !P.shapeFilled);
     if (brush) {
-      o.append(optRow(t === 'rect' || t === 'ellipse' || t === 'line' ? '선 굵기 ([ ])' : '크기 ([ ])', sizeSlider()));
-      o.append(optRow('모양', segment([['square', '사각'], ['round', '원형']], P.shape, (v) => { P.shape = v; savePrefs(); renderOptions(); updateCursor(); })));
+      o.append(optRow(tr(t === 'rect' || t === 'ellipse' || t === 'line' ? 'editor.opt.line_width' : 'editor.opt.size'), sizeSlider()));
+      o.append(optRow(tr('editor.opt.brush_shape'), segment([['square', tr('editor.opt.square')], ['round', tr('editor.opt.round')]], P.shape, (v) => { P.shape = v; savePrefs(); renderOptions(); updateCursor(); })));
     }
     if (t === 'pencil' || t === 'eraser') {
-      o.append(checkbox('픽셀 퍼펙트 (크기 1)', P.pixelPerfect, (v) => { P.pixelPerfect = v; savePrefs(); },
-        '1px 선에서 L 자 모서리 픽셀을 없애 깔끔한 선으로 만듭니다'));
+      o.append(checkbox(tr('editor.opt.pixel_perfect'), P.pixelPerfect, (v) => { P.pixelPerfect = v; savePrefs(); },
+        tr('editor.opt.pixel_perfect.title')));
     }
     if (t === 'fill') {
-      o.append(optRow('채우기', segment([['contiguous', '이어진 영역'], ['global', '전체 같은 색']], P.fillMode, (v) => { P.fillMode = v; savePrefs(); renderOptions(); })));
+      o.append(optRow(tr('editor.opt.fill'), segment([['contiguous', tr('editor.opt.contiguous')], ['global', tr('editor.opt.global')]], P.fillMode, (v) => { P.fillMode = v; savePrefs(); renderOptions(); })));
       o.append(toleranceRow());
     }
     if (t === 'wand') {
-      o.append(optRow('선택 범위', segment([['contiguous', '이어진 영역'], ['global', '전체 같은 색']], P.wandMode, (v) => { P.wandMode = v; savePrefs(); renderOptions(); })));
+      o.append(optRow(tr('editor.opt.wand_range'), segment([['contiguous', tr('editor.opt.contiguous')], ['global', tr('editor.opt.global')]], P.wandMode, (v) => { P.wandMode = v; savePrefs(); renderOptions(); })));
       if (P.wandMode === 'contiguous') {
-        o.append(checkbox('대각선도 이어진 것으로 (8방향)', P.wand8, (v) => { P.wand8 = v; savePrefs(); }, '끄면 상하좌우로 닿은 픽셀만 같은 영역으로 봅니다'));
+        o.append(checkbox(tr('common.diagonal'), P.wand8, (v) => { P.wand8 = v; savePrefs(); }, tr('editor.opt.wand_diag_title')));
       }
       o.append(toleranceRow());
-      o.append(el('p', 'muted small', '완전히 투명한 픽셀은 모두 같은 색으로 봅니다. 채우기와 같은 허용 오차를 씁니다.'));
+      o.append(el('p', 'muted small', tr('editor.opt.wand_note')));
     }
     if (t === 'rect' || t === 'ellipse') {
-      o.append(optRow('도형', segment([[false, '윤곽선'], [true, '채움']], P.shapeFilled, (v) => { P.shapeFilled = v; savePrefs(); renderOptions(); })));
+      o.append(optRow(tr('editor.opt.figure'), segment([[false, tr('editor.opt.outline')], [true, tr('editor.opt.filled')]], P.shapeFilled, (v) => { P.shapeFilled = v; savePrefs(); renderOptions(); })));
     }
-    if (t === 'picker') o.append(el('p', 'muted small', '클릭한 픽셀의 색(알파 포함)을 가져옵니다.'));
-    if (t === 'select' || t === 'wand') o.append(el('p', 'muted small', '선택이 있으면 다른 그리기 도구도 선택된 픽셀만 바꿉니다.'));
-    if (t === 'move') o.append(el('p', 'muted small', '선택 영역이 없으면 이미지 전체를 옮깁니다. 캔버스 밖으로 나간 부분은 확정할 때 잘립니다.'));
+    if (t === 'picker') o.append(el('p', 'muted small', tr('editor.opt.picker_note')));
+    if (t === 'select' || t === 'wand') o.append(el('p', 'muted small', tr('editor.opt.select_note')));
+    if (t === 'move') o.append(el('p', 'muted small', tr('editor.opt.move_note')));
     R.optSec.hidden = false;
   }
 
@@ -480,7 +500,7 @@ export function createEditor(host, hooks) {
     R.hex = el('input');
     R.hex.type = 'text';
     R.hex.spellcheck = false;
-    R.hex.placeholder = '#rrggbb 또는 #rrggbbaa';
+    localized(() => { R.hex.placeholder = tr('editor.picker.hex_placeholder'); });
     R.hex.oninput = () => {
       const c = parseHex(R.hex.value);
       R.hex.classList.toggle('bad', c == null);
@@ -492,8 +512,10 @@ export function createEditor(host, hooks) {
     head.append(R.popPrev, R.hex);
     pop.append(head);
     R.sl = {};
-    for (const [k, label] of [['r', 'R'], ['g', 'G'], ['b', 'B'], ['a', '알파']]) {
+    for (const [k, label] of [['r', 'R'], ['g', 'G'], ['b', 'B'], ['a', () => tr('editor.picker.alpha')]]) {
       const row = el('div', 'ed-ch');
+      const chLabel = el('span', 'ed-ch-label');
+      localized(() => { chLabel.textContent = typeof label === 'function' ? label() : label; });
       const r = el('input'); r.type = 'range'; r.min = 0; r.max = 255; r.step = 1;
       const n = el('input'); n.type = 'number'; n.min = 0; n.max = 255;
       const upd = (v) => {
@@ -508,13 +530,13 @@ export function createEditor(host, hooks) {
       n.oninput = () => { if (n.value !== '') upd(Number(n.value)); };
       n.onblur = () => syncPicker();
       R.sl[k] = [r, n];
-      row.append(el('span', 'ed-ch-label', label), r, n);
+      row.append(chLabel, r, n);
       pop.append(row);
     }
     const foot = el('div', 'row');
     R.sys = el('input');
     R.sys.type = 'color';
-    R.sys.title = '시스템 색 선택기';
+    localized(() => { R.sys.title = tr('editor.picker.system.title'); });
     R.sys.oninput = () => {
       const c = parseHex(R.sys.value);
       if (c == null || !S.pickerSlot) return;
@@ -523,8 +545,8 @@ export function createEditor(host, hooks) {
       savePrefs();
       syncColors();
     };
-    const clear = mkBtn('btn small', '투명', '완전 투명한 색', () => { if (S.pickerSlot) setColor(S.pickerSlot, 0); });
-    const close = mkBtn('btn small', '닫기', '', () => closePicker());
+    const clear = mkBtn('btn small', () => tr('editor.picker.transparent'), () => tr('editor.picker.transparent.title'), () => { if (S.pickerSlot) setColor(S.pickerSlot, 0); });
+    const close = mkBtn('btn small', () => tr('common.close'), '', () => closePicker());
     foot.append(R.sys, clear, el('span', 'spacer'), close);
     pop.append(foot);
     host.append(pop);
@@ -692,9 +714,9 @@ export function createEditor(host, hooks) {
       if (P.palSource === 'image') { computeImageColors(); renderPal(); }
     }
     const rows = [
-      ['크기', `${d.w} × ${d.h}`],
-      ['색상', d.colorCount ? `${d.colorCount.n}색${d.colorCount.trans ? ' + 투명' : ''}` : '…'],
-      ['원본 형식', d.path ? (d.indexed ? `인덱스 PNG (${d.palSize}색)` : 'RGBA PNG') : '새 이미지'],
+      [tr('editor.info.size'), `${d.w} × ${d.h}`],
+      [tr('editor.info.colors'), d.colorCount ? tn(d.colorCount.trans ? 'editor.info.color_count_trans' : 'editor.info.color_count', d.colorCount.n) : '…'],
+      [tr('editor.info.format'), d.path ? (d.indexed ? tn('editor.info.indexed', d.palSize) : 'RGBA PNG') : tr('editor.info.new_image')],
     ];
     for (const [k, v] of rows) R.info.append(el('dt', '', k), el('dd', '', v));
   }
@@ -1156,7 +1178,7 @@ export function createEditor(host, hooks) {
       else if (dr.kind === 'select') {
         dr.x1 = clamp(x, 0, d.w - 1); dr.y1 = clamp(y, 0, d.h - 1);
         if (!dr.moved && Math.hypot(e.clientX - dr.cx, e.clientY - dr.cy) >= 3) dr.moved = true;
-        if (dr.moved) R.selInfo.textContent = `선택 ${Math.abs(dr.x1 - dr.x0) + 1} × ${Math.abs(dr.y1 - dr.y0) + 1}`;
+        if (dr.moved) R.selInfo.textContent = tr('editor.sel.size', { w: Math.abs(dr.x1 - dr.x0) + 1, h: Math.abs(dr.y1 - dr.y0) + 1 });
       } else if (dr.kind === 'float') {
         if (!dr.moved && Math.hypot(e.clientX - dr.cx, e.clientY - dr.cy) >= 3) dr.moved = true;
         if (dr.moved || S.float) {
@@ -1272,7 +1294,8 @@ export function createEditor(host, hooks) {
     const sel = S.doc?.sel;
     if (!sel) return '';
     const rect = sel.count === sel.w * sel.h;
-    return `선택 ${sel.w} × ${sel.h}${rect ? '' : ` (${sel.count}칸)`} @ ${sel.x}, ${sel.y}${S.float ? ' · 떠 있음: Enter 확정, Esc 취소' : ''}`;
+    const p = { w: sel.w, h: sel.h, x: sel.x, y: sel.y, count: sel.count };
+    return `${tr(rect ? 'editor.sel.text' : 'editor.sel.text_cells', p)}${S.float ? ` · ${tr('editor.sel.floating')}` : ''}`;
   }
   function syncSel() {
     R.selInfo.textContent = selText();
@@ -1395,7 +1418,7 @@ export function createEditor(host, hooks) {
     if (f && sel) clip = { w: f.w, h: f.h, pix: f.pix.slice(), mask: sel.mask.slice() };
     else if (sel) clip = { w: sel.w, h: sel.h, pix: Sel.extractPix(d.px32, d.w, d.h, sel), mask: sel.mask.slice() };
     else clip = { w: d.w, h: d.h, pix: d.px32.slice(), mask: new Uint8Array(d.w * d.h).fill(1) };
-    if (showToast) hooks.toast(sel ? `선택 영역을 복사했습니다 (${clip.w} × ${clip.h})` : `이미지 전체를 복사했습니다 (${clip.w} × ${clip.h})`);
+    if (showToast) hooks.toast(tr(sel ? 'toast.copied_selection' : 'toast.copied_all', { w: clip.w, h: clip.h }));
   }
 
   function deleteSelection() {
@@ -1415,12 +1438,12 @@ export function createEditor(host, hooks) {
     if (busy() || !(S.doc.sel || S.float)) return;
     copySelection(false);
     deleteSelection();
-    hooks.toast('잘라냈습니다');
+    hooks.toast(tr('toast.cut'));
   }
 
   function pasteClip() {
     if (busy()) return;
-    if (!clip) { hooks.toast('붙여넣을 내용이 없습니다. 먼저 복사하세요 (Ctrl+C)'); return; }
+    if (!clip) { hooks.toast(tr('toast.paste_empty')); return; }
     commitFloat();
     const d = S.doc, v = S.view;
     // 지금 보이는 영역의 왼쪽 위에 붙입니다 (문서보다 크면 0, 0)
@@ -1490,13 +1513,13 @@ export function createEditor(host, hooks) {
     const anchor = { x: 1, y: 1 };
     const cells = [];
     const r = await modal({
-      title: '캔버스 크기',
+      title: tr('editor.canvas.title'),
       build: (b) => {
         wIn = el('input'); wIn.type = 'number'; wIn.min = 1; wIn.max = MAX_SIDE; wIn.value = d.w;
         hIn = el('input'); hIn.type = 'number'; hIn.min = 1; hIn.max = MAX_SIDE; hIn.value = d.h;
         const row = el('div', 'ed-newrow');
         const f = (label, input) => { const l = el('label', 'ed-newfield'); l.append(el('span', 'field-label', label), input); return l; };
-        row.append(f('너비 (px)', wIn), el('span', 'muted', '×'), f('높이 (px)', hIn));
+        row.append(f(tr('editor.field.width'), wIn), el('span', 'muted', '×'), f(tr('editor.field.height'), hIn));
         const grid = el('div', 'ed-anchor');
         const mark = () => cells.forEach((c) => c.classList.toggle('on', c.dataset.ax === String(anchor.x) && c.dataset.ay === String(anchor.y)));
         for (let ay = 0; ay < 3; ay++) {
@@ -1504,7 +1527,7 @@ export function createEditor(host, hooks) {
             const c = el('button', 'ed-anchor-cell');
             c.type = 'button';
             c.dataset.ax = ax; c.dataset.ay = ay;
-            c.title = '기존 이미지를 놓을 위치';
+            c.title = tr('editor.canvas.anchor_title');
             c.onclick = () => { anchor.x = ax; anchor.y = ay; mark(); };
             cells.push(c);
             grid.append(c);
@@ -1512,17 +1535,17 @@ export function createEditor(host, hooks) {
         }
         mark();
         const wrap = el('div', 'ed-anchor-wrap');
-        wrap.append(grid, el('p', 'muted small', '기준점: 기존 이미지를 새 캔버스의 어느 쪽에 맞출지 고릅니다. 작아지면 잘리고, 커지면 투명하게 채워집니다.'));
-        b.append(row, wrap, el('p', 'muted small', `현재 ${d.w} × ${d.h}`));
+        wrap.append(grid, el('p', 'muted small', tr('editor.canvas.anchor_note')));
+        b.append(row, wrap, el('p', 'muted small', tr('editor.canvas.current', { w: d.w, h: d.h })));
       },
       buttons: [
-        { label: '취소', value: null },
+        { label: tr('dialog.cancel'), value: null },
         {
-          label: '적용', value: 'ok', primary: true,
+          label: tr('dialog.apply'), value: 'ok', primary: true,
           validate: () => {
             const w = Number(wIn.value), h = Number(hIn.value);
             const ok = Number.isInteger(w) && Number.isInteger(h) && w >= 1 && h >= 1 && w <= MAX_SIDE && h <= MAX_SIDE && w * h <= MAX_PIXELS;
-            if (!ok) hooks.toast(`크기는 1~${MAX_SIDE}px, 전체 ${MAX_PIXELS / 1e6 | 0}백만 픽셀 이하여야 합니다`, 'failed');
+            if (!ok) hooks.toast(tr('common.size_limit', { max: MAX_SIDE, mp: MAX_PIXELS / 1e6 | 0 }), 'failed');
             return ok;
           },
         },
@@ -1534,17 +1557,17 @@ export function createEditor(host, hooks) {
     const ox = anchor.x === 0 ? 0 : anchor.x === 1 ? Math.floor((nw - d.w) / 2) : nw - d.w;
     const oy = anchor.y === 0 ? 0 : anchor.y === 1 ? Math.floor((nh - d.h) / 2) : nh - d.h;
     commitContent(nw, nh, T.cropPix(d.px32, d.w, d.h, -ox, -oy, nw, nh));
-    hooks.toast(`캔버스 크기를 ${nw} × ${nh} 로 바꿨습니다`);
+    hooks.toast(tr('toast.canvas_resized', { w: nw, h: nh }));
   }
 
   function cropToSelection() {
     if (busy()) return;
     commitFloat();
     const d = S.doc, sel = d.sel;
-    if (!sel) { hooks.toast('먼저 자를 영역을 선택하세요 (M)'); return; }
-    if (sel.x === 0 && sel.y === 0 && sel.w === d.w && sel.h === d.h) { hooks.toast('선택 영역이 이미지 전체입니다'); return; }
+    if (!sel) { hooks.toast(tr('toast.crop_need_selection')); return; }
+    if (sel.x === 0 && sel.y === 0 && sel.w === d.w && sel.h === d.h) { hooks.toast(tr('toast.crop_whole')); return; }
     commitContent(sel.w, sel.h, T.cropPix(d.px32, d.w, d.h, sel.x, sel.y, sel.w, sel.h));
-    hooks.toast(`선택 영역으로 잘랐습니다 (${sel.w} × ${sel.h})`);
+    hooks.toast(tr('toast.cropped', { w: sel.w, h: sel.h }));
   }
 
   function trimMargins() {
@@ -1552,11 +1575,11 @@ export function createEditor(host, hooks) {
     commitFloat();
     const d = S.doc;
     const b = T.opaqueBounds(d.px32, d.w, d.h);
-    if (!b) { hooks.toast('완전히 투명한 이미지라 자를 기준이 없습니다'); return; }
+    if (!b) { hooks.toast(tr('toast.trim_transparent')); return; }
     const nw = b.x1 - b.x0 + 1, nh = b.y1 - b.y0 + 1;
-    if (nw === d.w && nh === d.h) { hooks.toast('이미 투명한 여백이 없습니다'); return; }
+    if (nw === d.w && nh === d.h) { hooks.toast(tr('toast.trim_none')); return; }
     commitContent(nw, nh, T.cropPix(d.px32, d.w, d.h, b.x0, b.y0, nw, nh));
-    hooks.toast(`여백을 잘랐습니다 (${d.w} × ${d.h} → ${nw} × ${nh})`);
+    hooks.toast(tr('toast.trimmed', { w0: d.w, h0: d.h, w1: nw, h1: nh }));
   }
 
   // ---------- 메뉴 ----------
@@ -1597,37 +1620,37 @@ export function createEditor(host, hooks) {
 
   const hasSel = () => !!(S.doc && (S.doc.sel || S.float));
   const editMenu = () => [
-    { label: '잘라내기', key: 'Ctrl+X', disabled: !hasSel(), run: cutSelection },
-    { label: '복사', key: 'Ctrl+C', run: () => copySelection() },
-    { label: '붙여넣기', key: 'Ctrl+V', disabled: !clip, run: pasteClip },
-    { label: '선택 영역 지우기', key: 'Delete', disabled: !hasSel(), run: deleteSelection },
+    { label: tr('editor.menu.cut'), key: 'Ctrl+X', disabled: !hasSel(), run: cutSelection },
+    { label: tr('editor.menu.copy'), key: 'Ctrl+C', run: () => copySelection() },
+    { label: tr('editor.menu.paste'), key: 'Ctrl+V', disabled: !clip, run: pasteClip },
+    { label: tr('editor.menu.clear'), key: 'Delete', disabled: !hasSel(), run: deleteSelection },
     '-',
-    { label: '전체 선택', key: 'Ctrl+A', run: selectAll },
-    { label: '선택 해제', key: 'Ctrl+D', disabled: !hasSel(), run: deselect },
-    { label: '선택 반전', key: 'Ctrl+Shift+I', run: invertSelection },
+    { label: tr('editor.menu.select_all'), key: 'Ctrl+A', run: selectAll },
+    { label: tr('editor.menu.deselect'), key: 'Ctrl+D', disabled: !hasSel(), run: deselect },
+    { label: tr('editor.menu.invert'), key: 'Ctrl+Shift+I', run: invertSelection },
   ];
   const imageMenu = () => {
     const sel = hasSel();
-    const what = sel ? ' (선택 영역)' : '';
+    const what = sel ? ` ${tr('editor.menu.selection_suffix')}` : '';
     return [
-      { label: `가로 뒤집기${what}`, key: 'Shift+H', run: () => transform('flipH') },
-      { label: `세로 뒤집기${what}`, key: 'Shift+V', run: () => transform('flipV') },
-      { label: `시계 방향 90° 회전${what}`, run: () => transform('cw') },
-      { label: `반시계 방향 90° 회전${what}`, run: () => transform('ccw') },
-      { label: `180° 회전${what}`, run: () => transform('r180') },
+      { label: `${tr('editor.menu.flip_h')}${what}`, key: 'Shift+H', run: () => transform('flipH') },
+      { label: `${tr('editor.menu.flip_v')}${what}`, key: 'Shift+V', run: () => transform('flipV') },
+      { label: `${tr('editor.menu.rotate_cw')}${what}`, run: () => transform('cw') },
+      { label: `${tr('editor.menu.rotate_ccw')}${what}`, run: () => transform('ccw') },
+      { label: `${tr('editor.menu.rotate_180')}${what}`, run: () => transform('r180') },
       '-',
-      { label: '캔버스 크기…', run: canvasSizeDialog },
-      { label: '선택 영역으로 자르기', disabled: !sel, run: cropToSelection },
-      { label: '여백 자르기', run: trimMargins },
+      { label: tr('editor.menu.canvas_size'), run: canvasSizeDialog },
+      { label: tr('editor.menu.crop'), disabled: !sel, run: cropToSelection },
+      { label: tr('editor.menu.trim'), run: trimMargins },
     ];
   };
   const fxMenu = () => [
-    { label: '색상 줄이기…', run: () => openEffect('reduce') },
-    { label: '팔레트 적용…', run: () => openEffect('recolor') },
-    { label: '1:1 축소…', run: () => openEffect('downscale') },
-    { label: '확대…', run: () => openEffect('upscale') },
+    { label: tr('editor.menu.fx_reduce'), run: () => openEffect('reduce') },
+    { label: tr('editor.menu.fx_recolor'), run: () => openEffect('recolor') },
+    { label: tr('editor.menu.fx_downscale'), run: () => openEffect('downscale') },
+    { label: tr('editor.menu.fx_upscale'), run: () => openEffect('upscale') },
     '-',
-    { label: '작은 조각 지우기…', run: () => openEffect('despeckle') },
+    { label: tr('editor.menu.fx_despeckle'), run: () => openEffect('despeckle') },
   ];
 
   // ---------- 효과 (일괄 처리 기능을 현재 이미지에 적용) ----------
@@ -1649,7 +1672,12 @@ export function createEditor(host, hooks) {
       sized: `${d0.w}x${d0.h}`, req: null,
     };
     S.fx = fx;
-    const titles = { reduce: '색상 줄이기', recolor: '팔레트 적용', downscale: '1:1 축소', upscale: '확대', despeckle: '작은 조각 지우기' };
+    buildFxPanel(fx);
+  }
+
+  // Builds (or, after a language change, rebuilds) the options panel of the running effect and recomputes the preview.
+  function buildFxPanel(fx) {
+    const kind = fx.kind, d0 = fx.orig;
     const body = el('div', 'ed-opts');
     const status = el('p', 'small ed-fx-status', '');
     fx.status = status;
@@ -1659,7 +1687,7 @@ export function createEditor(host, hooks) {
       const box = el('div', 'ed-opts');
       const draw = () => {
         box.replaceChildren();
-        box.append(segment([['threshold', '병합 강도'], ['count', '최대 색상 수']], fxPrefs.mode, (v) => { fxPrefs.mode = v; saveFxPrefs(); draw(); run(); }));
+        box.append(segment([['threshold', tr('batch.reduce.threshold')], ['count', tr('batch.reduce.count')]], fxPrefs.mode, (v) => { fxPrefs.mode = v; saveFxPrefs(); draw(); run(); }));
         if (fxPrefs.mode === 'threshold') {
           const w = el('div', 'ed-range');
           const r = el('input');
@@ -1667,7 +1695,7 @@ export function createEditor(host, hooks) {
           const v = el('span', 'value', Number(fxPrefs.threshold).toFixed(3));
           r.oninput = () => { fxPrefs.threshold = Number(r.value); v.textContent = fxPrefs.threshold.toFixed(3); saveFxPrefs(); run(); };
           w.append(r, v);
-          box.append(optRow('클수록 비슷한 색을 더 많이 합칩니다', w));
+          box.append(optRow(tr('editor.fx.reduce_strength'), w));
         } else {
           const n = el('input');
           n.type = 'number'; n.min = 1; n.max = 256; n.value = fxPrefs.maxColors;
@@ -1675,7 +1703,7 @@ export function createEditor(host, hooks) {
             const v = Math.round(Number(n.value));
             if (v >= 1 && v <= 256) { fxPrefs.maxColors = v; saveFxPrefs(); run(); }
           };
-          box.append(optRow('남길 색상 수 (1~256)', n));
+          box.append(optRow(tr('editor.fx.reduce_count'), n));
         }
       };
       draw();
@@ -1687,8 +1715,8 @@ export function createEditor(host, hooks) {
       const sel = el('select');
       const fill = (want) => {
         sel.replaceChildren();
-        if (!PAL.list.length) sel.append(new Option('저장된 팔레트 없음', ''));
-        PAL.list.forEach((p) => sel.append(new Option(`${p.label} (${p.colors.length}색)`, p.name)));
+        if (!PAL.list.length) sel.append(new Option(tr('common.no_palettes'), ''));
+        PAL.list.forEach((p) => sel.append(new Option(tn('common.palette_option', p.colors.length, { name: p.label }), p.name)));
         if (want && PAL.list.some((p) => p.name === want)) sel.value = want;
         else if (PAL.list.some((p) => p.name === fxPrefs.palette)) sel.value = fxPrefs.palette;
         fxPrefs.palette = sel.value;
@@ -1696,7 +1724,7 @@ export function createEditor(host, hooks) {
       fill();
       refreshPalList().then(() => { if (S.fx === fx) { fill(); run(); } });
       sel.onchange = () => { fxPrefs.palette = sel.value; saveFxPrefs(); run(); };
-      const file = mkBtn('btn small', 'PNG 파일…', '팔레트 PNG (색 1개 = 1px) 고르기', async () => {
+      const file = mkBtn('btn small', tr('editor.pal.file'), tr('editor.fx.palette_file.title'), async () => {
         const f = await PickPaletteFile();
         if (!f || S.fx !== fx) return;
         try {
@@ -1707,7 +1735,7 @@ export function createEditor(host, hooks) {
           run();
         } catch (err) { hooks.toast(String(err), 'failed'); }
       });
-      body.append(optRow('팔레트', sel), file);
+      body.append(optRow(tr('editor.fx.palette'), sel), file);
       fx.req = () => ({ command: 'recolor', palette: sel.value });
     } else if (kind === 'despeckle') {
       const n = el('input');
@@ -1716,42 +1744,42 @@ export function createEditor(host, hooks) {
         const v = Math.round(Number(n.value));
         if (v >= 1 && v <= 100000) { fxPrefs.minSize = v; saveFxPrefs(); run(); }
       };
-      const diag = checkbox('대각선도 이어진 것으로 (8방향)', fxPrefs.diagonal, (v) => { fxPrefs.diagonal = v; saveFxPrefs(); run(); },
-        '끄면 상하좌우로 닿은 픽셀만 한 조각으로 봅니다');
-      body.append(optRow('이보다 픽셀 수가 적은 조각을 지움', n), diag,
-        el('p', 'muted small', '투명하지 않은 픽셀이 이어진 덩어리를 한 조각으로 봅니다. 알파가 조금이라도 있으면 내용으로 칩니다.'));
+      const diag = checkbox(tr('common.diagonal'), fxPrefs.diagonal, (v) => { fxPrefs.diagonal = v; saveFxPrefs(); run(); },
+        tr('batch.despeckle.diag_title'));
+      body.append(optRow(tr('batch.despeckle.min'), n), diag,
+        el('p', 'muted small', tr('editor.fx.despeckle_note')));
       fx.req = () => ({ command: 'despeckle', minSize: fxPrefs.minSize, diagonal: fxPrefs.diagonal });
     } else if (kind === 'downscale') {
       const sel = el('select');
-      FX_SCALES.forEach((v) => sel.append(new Option(v === 0 ? '자동 감지' : `${v}배`, v)));
+      FX_SCALES.forEach((v) => sel.append(new Option(v === 0 ? tr('common.auto_detect') : tr('common.scale_option', { n: v }), v)));
       sel.value = String(fxPrefs.scale);
       sel.onchange = () => { fxPrefs.scale = Number(sel.value); saveFxPrefs(); run(); };
-      body.append(optRow('축소 배율', sel), el('p', 'muted small', '확대돼 저장된 픽셀 아트를 원래 크기로 되돌립니다.'));
+      body.append(optRow(tr('editor.fx.downscale_scale'), sel), el('p', 'muted small', tr('editor.fx.downscale_note')));
       fx.req = () => ({ command: 'downscale', scale: fxPrefs.scale });
     } else {
       const sel = el('select');
-      FX_UPSCALES.forEach((v) => sel.append(new Option(`${v}배`, v)));
+      FX_UPSCALES.forEach((v) => sel.append(new Option(tr('common.scale_option', { n: v }), v)));
       sel.value = String(fxPrefs.upscale);
       sel.onchange = () => { fxPrefs.upscale = Number(sel.value); saveFxPrefs(); run(); };
-      body.append(optRow('확대 배율', sel), el('p', 'muted small', '정수 배율로 픽셀을 그대로 키웁니다.'));
+      body.append(optRow(tr('editor.fx.upscale_scale'), sel), el('p', 'muted small', tr('editor.fx.upscale_note')));
       fx.req = () => ({ command: 'upscale', scale: fxPrefs.upscale });
     }
 
-    const cmp = el('button', 'btn small', '원본 보기 (누르고 있기)');
+    const cmp = el('button', 'btn small', tr('editor.fx.compare'));
     cmp.type = 'button';
-    cmp.title = '누르고 있는 동안 원본을 보여 줍니다';
+    cmp.title = tr('editor.fx.compare.title');
     const showOrig = (on) => { fx.showOrig = on; cmp.classList.toggle('on', on); showFxDoc(); };
     cmp.onpointerdown = () => showOrig(true);
     cmp.onpointerup = cmp.onpointerleave = cmp.onpointercancel = () => { if (fx.showOrig) showOrig(false); };
-    fx.ok = mkBtn('btn small primary', '확인', '적용 (Enter)', () => applyEffect());
+    fx.ok = mkBtn('btn small primary', tr('editor.fx.ok'), tr('editor.fx.ok.title'), () => applyEffect());
     fx.ok.disabled = true;
-    const cancel = mkBtn('btn small', '취소', '되돌리기 (Esc)', () => cancelFx());
+    const cancel = mkBtn('btn small', tr('editor.fx.cancel'), tr('editor.fx.cancel.title'), () => cancelFx());
     const foot = el('div', 'row');
     foot.append(fx.ok, cancel);
     const scope = kind === 'despeckle'
-      ? (d0.sel ? '선택 영역이 있어 그 안쪽 픽셀만 지웁니다. 조각은 이미지 전체에서 찾습니다.' : '선택 영역이 있으면 그 안쪽 픽셀만 지웁니다 (없으면 이미지 전체).')
-      : '선택 영역과 상관없이 이미지 전체에 적용됩니다.';
-    R.fxSec.replaceChildren(el('h3', '', `효과 — ${titles[kind]}`), body, status, el('p', 'muted small', scope), cmp, foot);
+      ? tr(d0.sel ? 'editor.fx.scope_despeckle_sel' : 'editor.fx.scope_despeckle')
+      : tr('editor.fx.scope_all');
+    R.fxSec.replaceChildren(el('h3', '', tr('editor.fx.title', { name: tr(`editor.fx.name.${kind}`) })), body, status, el('p', 'muted small', scope), cmp, foot);
     R.fxSec.hidden = false;
     R.side.scrollTop = 0;
     syncTop();
@@ -1767,20 +1795,20 @@ export function createEditor(host, hooks) {
     const req = fx.req();
     if (req.command === 'recolor' && !req.palette) {
       fx.result = null;
-      fx.status.textContent = '팔레트를 선택하세요';
+      fx.status.textContent = tr('editor.fx.choose_palette');
       fx.status.className = 'small warn ed-fx-status';
       fx.ok.disabled = true;
       showFxDoc();
       return;
     }
-    fx.status.textContent = '계산 중…';
+    fx.status.textContent = tr('editor.fx.calculating');
     fx.status.className = 'small muted ed-fx-status';
     try {
       const res = await ProcessPixels(req, d0.w, d0.h, fx.b64);
       if (t !== fx.token || S.fx !== fx) return;
       if (res.skipped) {
         fx.result = null;
-        fx.status.textContent = `변화 없음: ${res.message}`;
+        fx.status.textContent = tr('editor.fx.no_change', { msg: res.message });
         fx.status.className = 'small warn ed-fx-status';
         fx.ok.disabled = true;
       } else {
@@ -1804,14 +1832,14 @@ export function createEditor(host, hooks) {
           }
           if (!cnt) {
             fx.result = null;
-            fx.status.textContent = '선택 영역 안에는 지울 조각이 없습니다';
+            fx.status.textContent = tr('editor.fx.no_pieces');
             fx.status.className = 'small warn ed-fx-status';
             fx.ok.disabled = true;
             showFxDoc();
             return;
           }
           pix = new Uint8ClampedArray(merged.buffer);
-          msg = `선택 영역 안의 픽셀 ${cnt}개 제거 (${res.message})`;
+          msg = tn('editor.fx.removed_in_selection', cnt, { msg: res.message });
         }
         fx.result = { doc: rebuildDoc(d0, res.width, res.height, pix), msg, w: res.width, h: res.height };
         fx.status.textContent = `${msg} → ${res.width} × ${res.height}`;
@@ -1871,8 +1899,8 @@ export function createEditor(host, hooks) {
     const { doc, msg, w, h } = fx.result;
     closeFxUi();
     const changed = commitContent(w, h, new Uint32Array(doc.pix.slice().buffer));
-    if (!changed) { afterChange(); hooks.toast('바뀐 내용이 없습니다'); return; }
-    hooks.toast(`적용했습니다: ${msg}`);
+    if (!changed) { afterChange(); hooks.toast(tr('toast.fx_nochange')); return; }
+    hooks.toast(tr('toast.fx_applied', { msg }));
   }
 
   // ---------- 팔레트 패널 ----------
@@ -1918,16 +1946,16 @@ export function createEditor(host, hooks) {
 
   function curPal() {
     const src = P.palSource;
-    if (src === 'image') return { id: 'image', label: `이미지에서 (${PAL.img.colors.length}색)`, colors: PAL.img.colors };
+    if (src === 'image') return { id: 'image', label: tn('editor.pal.image_n', PAL.img.colors.length), colors: PAL.img.colors };
     const p = src.startsWith('pal:') && PAL.list.find((x) => `pal:${x.name}` === src);
     if (p) return { id: src, label: p.label, colors: p.colors, name: p.name };
-    return { id: 'adhoc', label: `내 팔레트 (${P.adhoc.length}색)`, colors: P.adhoc };
+    return { id: 'adhoc', label: tn('editor.pal.mine_n', P.adhoc.length), colors: P.adhoc };
   }
 
   function buildPalette() {
-    const pal = section('팔레트');
+    const pal = section('editor.section.palette');
     R.palSel = el('select', 'ed-pal-sel');
-    R.palSel.title = '보여 줄 팔레트';
+    localized(() => { R.palSel.title = tr('editor.pal.title'); });
     R.palSel.onchange = () => {
       P.palSource = R.palSel.value;
       PAL.selIdx = -1;
@@ -1938,17 +1966,17 @@ export function createEditor(host, hooks) {
     };
     R.palGrid = el('div', 'ed-pal-grid');
     R.palInfo = el('div', 'muted small ed-pal-info', '');
-    R.palAdd = mkBtn('btn small', '현재 색 추가', '주 색을 내 팔레트에 추가', () => palAdd());
-    R.palDel = mkBtn('btn small', '선택한 색 제거', '팔레트에서 클릭한 색(없으면 주 색과 같은 색)을 내 팔레트에서 제거', () => palRemove());
-    R.palCopy = mkBtn('btn small', '내 팔레트로 복사', '지금 보이는 팔레트를 내 팔레트로 복사해 고칠 수 있게 합니다', () => palCopyToAdhoc());
-    R.palSave = mkBtn('btn small', '팔레트로 저장…', '지금 보이는 색을 공용 팔레트 폴더에 이름을 붙여 저장 (일괄 처리의 팔레트 적용에서도 쓰임)', () => palSave());
+    R.palAdd = mkBtn('btn small', () => tr('editor.pal.add'), () => tr('editor.pal.add.title'), () => palAdd());
+    R.palDel = mkBtn('btn small', () => tr('editor.pal.remove'), () => tr('editor.pal.remove.title'), () => palRemove());
+    R.palCopy = mkBtn('btn small', () => tr('editor.pal.copy'), () => tr('editor.pal.copy.title'), () => palCopyToAdhoc());
+    R.palSave = mkBtn('btn small', () => tr('editor.pal.save'), () => tr('editor.pal.save.title'), () => palSave());
     R.palName = el('input');
     R.palName.type = 'text';
-    R.palName.placeholder = 'Lospec 팔레트 이름';
+    localized(() => { R.palName.placeholder = tr('editor.pal.name_placeholder'); });
     R.palName.spellcheck = false;
     R.palName.onkeydown = (e) => { if (e.key === 'Enter') palFetch(); };
-    R.palFetch = mkBtn('btn small', '불러오기', 'Lospec 에서 내려받아 저장하고 표시', () => palFetch());
-    R.palFile = mkBtn('btn small', 'PNG 파일…', '팔레트 PNG (색 1개 = 1px) 파일 열기', () => palFile());
+    R.palFetch = mkBtn('btn small', () => tr('editor.pal.fetch'), () => tr('editor.pal.fetch.title'), () => palFetch());
+    R.palFile = mkBtn('btn small', () => tr('editor.pal.file'), () => tr('editor.pal.file.title'), () => palFile());
     const r1 = el('div', 'ed-palrow'), r2 = el('div', 'ed-palrow'), r3 = el('div', 'ed-palrow');
     r1.append(R.palAdd, R.palDel, R.palCopy);
     r2.append(R.palName, R.palFetch);
@@ -1961,9 +1989,9 @@ export function createEditor(host, hooks) {
   function renderPal() {
     const cur = curPal();
     R.palSel.replaceChildren(
-      new Option(`내 팔레트 (${P.adhoc.length}색)`, 'adhoc'),
-      new Option(`이미지에서 (${PAL.img.colors.length}색)`, 'image'),
-      ...PAL.list.map((p) => new Option(`${p.label} (${p.colors.length}색)`, `pal:${p.name}`)),
+      new Option(tn('editor.pal.mine_n', P.adhoc.length), 'adhoc'),
+      new Option(tn('editor.pal.image_n', PAL.img.colors.length), 'image'),
+      ...PAL.list.map((p) => new Option(tn('common.palette_option', p.colors.length, { name: p.label }), `pal:${p.name}`)),
     );
     R.palSel.value = cur.id;
     R.palGrid.replaceChildren(...cur.colors.map((c, i) => {
@@ -1971,15 +1999,15 @@ export function createEditor(host, hooks) {
       b.type = 'button';
       b.style.setProperty('--c', css(c));
       b.dataset.c = String(c);
-      b.title = `${toHex(c)} — 클릭: 주 색, 오른쪽 클릭: 보조 색`;
+      b.title = tr('editor.color.click_hint', { hex: toHex(c) });
       b.onclick = () => { PAL.selIdx = i; setColor('primary', c); b.blur(); };
       b.oncontextmenu = (e) => { e.preventDefault(); setColor('secondary', c); };
       return b;
     }));
     if (!cur.colors.length) {
-      R.palGrid.append(el('span', 'muted small ed-pal-empty', cur.id === 'adhoc' ? '‘현재 색 추가’로 색을 모아 보세요' : cur.id === 'image' ? '불투명한 색이 없습니다' : '색이 없습니다'));
+      R.palGrid.append(el('span', 'muted small ed-pal-empty', tr(cur.id === 'adhoc' ? 'editor.pal.empty_mine' : cur.id === 'image' ? 'editor.pal.empty_image' : 'editor.pal.empty')));
     }
-    R.palInfo.textContent = cur.id === 'image' && PAL.img.total > 256 ? `전체 ${PAL.img.total}색 중 많이 쓴 256색만 표시` : cur.id === 'image' ? '많이 쓴 색 순 · 투명 제외' : '';
+    R.palInfo.textContent = cur.id === 'image' && PAL.img.total > 256 ? tr('editor.pal.image_info_many', { total: PAL.img.total }) : cur.id === 'image' ? tr('editor.pal.image_info') : '';
     R.palInfo.hidden = !R.palInfo.textContent;
     const adhoc = cur.id === 'adhoc';
     R.palAdd.disabled = !adhoc;
@@ -2007,9 +2035,9 @@ export function createEditor(host, hooks) {
     const cur = curPal();
     if (P.adhoc.length) {
       const r = await modal({
-        title: '내 팔레트로 복사',
-        build: (b) => b.append(el('p', '', `지금 보이는 ${cur.colors.length}색을 내 팔레트로 복사합니다. 기존 내 팔레트(${P.adhoc.length}색)는 사라집니다.`)),
-        buttons: [{ label: '취소', value: null }, { label: '복사', value: 'ok', primary: true }],
+        title: tr('editor.pal.copy_dialog.title'),
+        build: (b) => b.append(el('p', '', tr('editor.pal.copy_dialog.body', { n: cur.colors.length, m: P.adhoc.length }))),
+        buttons: [{ label: tr('dialog.cancel'), value: null }, { label: tr('dialog.copy'), value: 'ok', primary: true }],
       });
       if (r !== 'ok') return;
     }
@@ -2022,11 +2050,11 @@ export function createEditor(host, hooks) {
 
   function palAdd() {
     if (P.palSource !== 'adhoc') return;
-    if (P.primary >>> 24 === 0) { hooks.toast('투명한 색은 팔레트에 추가할 수 없습니다'); return; }
+    if (P.primary >>> 24 === 0) { hooks.toast(tr('toast.pal_transparent')); return; }
     const c = (P.primary | 0xff000000) >>> 0;
     const at = P.adhoc.indexOf(c);
-    if (at >= 0) { PAL.selIdx = at; renderPal(); hooks.toast('이미 팔레트에 있는 색입니다'); return; }
-    if (P.adhoc.length >= 256) { hooks.toast('팔레트는 최대 256색입니다'); return; }
+    if (at >= 0) { PAL.selIdx = at; renderPal(); hooks.toast(tr('toast.pal_exists')); return; }
+    if (P.adhoc.length >= 256) { hooks.toast(tr('toast.pal_max')); return; }
     P.adhoc.push(c);
     PAL.selIdx = P.adhoc.length - 1;
     savePrefs();
@@ -2037,7 +2065,7 @@ export function createEditor(host, hooks) {
     if (P.palSource !== 'adhoc') return;
     let i = PAL.selIdx;
     if (!(i >= 0 && i < P.adhoc.length)) i = P.adhoc.indexOf(P.primary);
-    if (i < 0) { hooks.toast('제거할 색을 팔레트에서 먼저 클릭하세요'); return; }
+    if (i < 0) { hooks.toast(tr('toast.pal_pick_first')); return; }
     P.adhoc.splice(i, 1);
     PAL.selIdx = -1;
     savePrefs();
@@ -2048,7 +2076,7 @@ export function createEditor(host, hooks) {
     const name = R.palName.value.trim();
     if (!name) return;
     R.palFetch.disabled = true;
-    R.palFetch.textContent = '불러오는 중…';
+    R.palFetch.textContent = tr('common.loading');
     try {
       const p = await LoadPalette(name);
       R.palName.value = '';
@@ -2057,7 +2085,7 @@ export function createEditor(host, hooks) {
       hooks.toast(String(err), 'failed');
     } finally {
       R.palFetch.disabled = false;
-      R.palFetch.textContent = '불러오기';
+      R.palFetch.textContent = tr('editor.pal.fetch');
     }
   }
 
@@ -2079,7 +2107,7 @@ export function createEditor(host, hooks) {
     if (!colors.length) return;
     let nameIn;
     const r = await modal({
-      title: '팔레트로 저장',
+      title: tr('editor.pal.save_dialog.title'),
       build: (b) => {
         nameIn = el('input');
         nameIn.type = 'text';
@@ -2087,18 +2115,18 @@ export function createEditor(host, hooks) {
         nameIn.placeholder = 'my-palette';
         nameIn.value = cur.name && !cur.name.toLowerCase().endsWith('.png') ? cur.name : '';
         b.append(
-          el('p', '', `지금 보이는 ${colors.length}색을 공용 팔레트 폴더에 저장합니다.`),
+          el('p', '', tr('editor.pal.save_dialog.body', { n: colors.length })),
           nameIn,
-          el('p', 'muted small', '이름은 영문 소문자, 숫자, - 만 쓸 수 있습니다. 저장하면 일괄 처리의 ‘팔레트 적용’ 목록에도 나타납니다.'),
+          el('p', 'muted small', tr('editor.pal.save_dialog.note')),
         );
       },
       buttons: [
-        { label: '취소', value: null },
+        { label: tr('dialog.cancel'), value: null },
         {
-          label: '저장', value: 'ok', primary: true,
+          label: tr('dialog.save'), value: 'ok', primary: true,
           validate: () => {
             const ok = /^[a-z0-9][a-z0-9-]*$/.test(nameIn.value.trim().toLowerCase());
-            if (!ok) hooks.toast('팔레트 이름은 영문 소문자, 숫자, - 만 쓸 수 있습니다 (예: my-palette)', 'failed');
+            if (!ok) hooks.toast(tr('toast.pal_name_invalid'), 'failed');
             return ok;
           },
         },
@@ -2110,16 +2138,16 @@ export function createEditor(host, hooks) {
       let force = false;
       if (await PaletteExists(name)) {
         const o = await modal({
-          title: '같은 이름의 팔레트가 있습니다',
-          build: (b) => b.append(el('p', '', `‘${name}’ 팔레트를 덮어쓸까요?`)),
-          buttons: [{ label: '취소', value: null }, { label: '덮어쓰기', value: 'ok', primary: true }],
+          title: tr('editor.pal.exists_dialog.title'),
+          build: (b) => b.append(el('p', '', tr('editor.pal.exists_dialog.body', { name }))),
+          buttons: [{ label: tr('dialog.cancel'), value: null }, { label: tr('dialog.overwrite'), value: 'ok', primary: true }],
         });
         if (o !== 'ok') return;
         force = true;
       }
       const info = await SavePaletteColors(name, colors.map((c) => toHex((c | 0xff000000) >>> 0)), force);
       await refreshPalList(info.name);
-      hooks.toast(`팔레트 ‘${info.name}’ 저장됨 · ${info.colors.length}색`);
+      hooks.toast(tn('toast.pal_saved', info.colors.length, { name: info.name }));
     } catch (err) {
       hooks.toast(String(err), 'failed');
     }
@@ -2163,13 +2191,14 @@ export function createEditor(host, hooks) {
   const newName = () => {
     let n = 1;
     const taken = new Set(S.docs.map((d) => d.name));
-    while (taken.has(n === 1 ? '제목 없음.png' : `제목 없음 ${n}.png`)) n++;
-    return n === 1 ? '제목 없음.png' : `제목 없음 ${n}.png`;
+    const name = (k) => (k === 1 ? tr('editor.untitled') : tr('editor.untitled_n', { n: k }));
+    while (taken.has(name(n))) n++;
+    return name(n);
   };
 
   // 작업 중(획·효과 미리보기)에는 문서를 바꾸지 않습니다. 효과 미리보기는 안내만 하고 그대로 둡니다.
   function canSwitch() {
-    if (S.fx) { hooks.toast('효과 미리보기를 먼저 확정(Enter)하거나 취소(Esc)하세요'); return false; }
+    if (S.fx) { hooks.toast(tr('toast.fx_finish_first')); return false; }
     return !S.cur;
   }
 
@@ -2274,17 +2303,17 @@ export function createEditor(host, hooks) {
     if (S.fx) { canSwitch(); return; }
     if (S.cur || S.drag) return;
     const list = visibleList(hooks.files(), hooks.getFilter());
-    if (!list.length) { hooks.toast('파일 목록이 비어 있습니다. 파일 띠의 ＋ 로 추가하세요'); return; }
+    if (!list.length) { hooks.toast(tr('toast.list_empty')); return; }
     const cur = S.doc?.path;
     const i = list.findIndex((f) => sameFile(f.path, cur));
     const ni = i < 0 ? (dir > 0 ? 0 : list.length - 1) : i + dir;
-    if (ni < 0 || ni >= list.length) { hooks.toast(dir > 0 ? '마지막 파일입니다' : '첫 파일입니다'); return; }
+    if (ni < 0 || ni >= list.length) { hooks.toast(tr(dir > 0 ? 'toast.last_file' : 'toast.first_file')); return; }
     const d = S.doc;
     // 자동 저장: 고친 문서를 저장하고 넘어갑니다. 저장에 실패하면 넘어가지 않습니다.
     if (d && P.autoSave && isDirty(d) && d.path) {
       const r = await saveDoc(d, false);
       if (!r.ok) {
-        if (r.error) hooks.toast(`자동 저장 실패: ${r.error}`, 'failed');
+        if (r.error) hooks.toast(tr('toast.autosave_failed', { error: r.error }), 'failed');
         return;
       }
     }
@@ -2297,14 +2326,14 @@ export function createEditor(host, hooks) {
     if (S.doc && S.doc.id === d.id) { cancelFx(); commitFloat(); }
     if (isDirty(d) && !opt.discard) {
       const r = await modal({
-        title: '저장하지 않은 변경 사항이 있습니다',
-        build: (b) => b.append(el('p', '', `'${d.name}' 의 변경 사항을 저장할까요?`)),
-        buttons: [{ label: '취소', value: 'cancel' }, { label: '저장 안 함', value: 'discard' }, { label: '저장', value: 'save', primary: true }],
+        title: tr('editor.close.title'),
+        build: (b) => b.append(el('p', '', tr('editor.close.body', { name: d.name }))),
+        buttons: [{ label: tr('dialog.cancel'), value: 'cancel' }, { label: tr('dialog.discard'), value: 'discard' }, { label: tr('dialog.save'), value: 'save', primary: true }],
       });
       if (r === 'save') {
         const sr = await saveDoc(d, false);
         if (!sr.ok) {
-          if (sr.error) hooks.toast(`저장 실패: ${sr.error}`, 'failed');
+          if (sr.error) hooks.toast(tr('toast.save_failed', { error: sr.error }), 'failed');
           return false;
         }
         reportSaved(sr);
@@ -2338,7 +2367,7 @@ export function createEditor(host, hooks) {
     }
     for (const d of clean) removeDoc(d);
     afterChange();
-    hooks.toast(`수정하지 않은 탭 ${clean.length}개를 닫았습니다`);
+    hooks.toast(tn('toast.closed_clean', clean.length));
   }
 
   // 목록에 파일을 더하고 첫 파일을 엽니다 (탐색 열기). 열 수 있는 경로 목록을 돌려줍니다.
@@ -2354,7 +2383,7 @@ export function createEditor(host, hooks) {
   }
   async function addFolderDialog() {
     if (S.cur || S.fx) return;
-    const dir = await PickFolder('이미지 폴더 선택');
+    const dir = await PickFolder(tr('dialog.pick_image_dir'));
     if (dir) await addAndOpen([dir]);
   }
 
@@ -2368,13 +2397,13 @@ export function createEditor(host, hooks) {
     if (S.cur || S.fx) return;
     let wIn, hIn;
     const r = await modal({
-      title: '새 이미지',
+      title: tr('editor.new.title_dialog'),
       build: (b) => {
         wIn = el('input'); wIn.type = 'number'; wIn.min = 1; wIn.max = MAX_SIDE; wIn.value = 32;
         hIn = el('input'); hIn.type = 'number'; hIn.min = 1; hIn.max = MAX_SIDE; hIn.value = 32;
         const row = el('div', 'ed-newrow');
         const f = (label, input) => { const l = el('label', 'ed-newfield'); l.append(el('span', 'field-label', label), input); return l; };
-        row.append(f('너비 (px)', wIn), el('span', 'muted', '×'), f('높이 (px)', hIn));
+        row.append(f(tr('editor.field.width'), wIn), el('span', 'muted', '×'), f(tr('editor.field.height'), hIn));
         const presets = el('div', 'chips');
         for (const n of [16, 32, 64, 128, 256]) {
           const c = el('button', 'chip', `${n}×${n}`);
@@ -2382,16 +2411,16 @@ export function createEditor(host, hooks) {
           c.onclick = () => { wIn.value = n; hIn.value = n; };
           presets.append(c);
         }
-        b.append(row, presets, el('p', 'muted small', '배경은 투명으로 시작합니다.'));
+        b.append(row, presets, el('p', 'muted small', tr('editor.new.note')));
       },
       buttons: [
-        { label: '취소', value: null },
+        { label: tr('dialog.cancel'), value: null },
         {
-          label: '만들기', value: 'ok', primary: true,
+          label: tr('dialog.create'), value: 'ok', primary: true,
           validate: () => {
             const w = Number(wIn.value), h = Number(hIn.value);
             const ok = Number.isInteger(w) && Number.isInteger(h) && w >= 1 && h >= 1 && w <= MAX_SIDE && h <= MAX_SIDE && w * h <= MAX_PIXELS;
-            if (!ok) hooks.toast(`크기는 1~${MAX_SIDE}px, 전체 ${MAX_PIXELS / 1e6 | 0}백만 픽셀 이하여야 합니다`, 'failed');
+            if (!ok) hooks.toast(tr('common.size_limit', { max: MAX_SIDE, mp: MAX_PIXELS / 1e6 | 0 }), 'failed');
             return ok;
           },
         },
@@ -2407,7 +2436,7 @@ export function createEditor(host, hooks) {
   // 문서 하나를 저장합니다. as 이거나 경로가 없으면 저장 대화상자를 엽니다.
   // 반환: { ok, canceled, error, res, isNewPath, backup, name } — 토스트는 부르는 쪽이 정합니다.
   async function saveDoc(d, as = false) {
-    if (S.saving) return { ok: false, error: '다른 저장이 진행 중입니다' };
+    if (S.saving) return { ok: false, error: tr('toast.save_busy') };
     S.saving = true;
     try {
       if (S.doc && S.doc.id === d.id && !S.fx) commitFloat();
@@ -2439,8 +2468,8 @@ export function createEditor(host, hooks) {
   }
 
   function reportSaved(r) {
-    const fmt = r.res.format === 'indexed' ? `인덱스 PNG ${r.res.colors}색` : 'RGBA PNG';
-    hooks.toast(`${r.name} 저장됨 · ${fmt}${r.backup ? ' · 원본 백업됨' : ''}`, '', r.actions);
+    const format = r.res.format === 'indexed' ? tn('toast.format_indexed', r.res.colors) : 'RGBA PNG';
+    hooks.toast(tr(r.backup ? 'toast.saved_backup' : 'toast.saved', { name: r.name, format }), '', r.actions);
   }
 
   // 현재 문서를 저장합니다. 성공하면 true.
@@ -2450,7 +2479,7 @@ export function createEditor(host, hooks) {
     if (!d) return false;
     const r = await saveDoc(d, as);
     if (r.ok) { reportSaved(r); return true; }
-    if (r.error) hooks.toast(`저장 실패: ${r.error}`, 'failed');
+    if (r.error) hooks.toast(tr('toast.save_failed', { error: r.error }), 'failed');
     return false;
   }
 
@@ -2461,21 +2490,21 @@ export function createEditor(host, hooks) {
     if (S.cur || S.saving) return;
     commitFloat();
     const targets = dirtyDocs();
-    if (!targets.length) { hooks.toast('저장할 변경 사항이 없습니다'); return; }
+    if (!targets.length) { hooks.toast(tr('toast.nothing_to_save')); return; }
     let saved = 0, backups = 0;
     const skipped = [], failed = [];
     for (const d of targets) {
       if (!d.path) { skipped.push(d); continue; }
       const r = await saveDoc(d, false);
       if (r.ok) { saved++; if (r.backup) backups++; }
-      else failed.push(`${d.name}: ${r.error || '취소됨'}`);
+      else failed.push(`${d.name}: ${r.error || tr('status.canceled')}`);
     }
-    const parts = saved ? [`${saved}개 저장됨${backups ? ` · 원본 백업 ${backups}개` : ''}`] : [];
-    if (skipped.length) parts.push(`경로가 없는 새 문서 ${skipped.length}개는 건너뜀`);
-    if (failed.length) parts.push(`실패 ${failed.length}개 (${failed[0]})`);
+    const parts = saved ? [backups ? tr('toast.saved_all_backup', { n: saved, b: backups }) : tr('toast.saved_all', { n: saved })] : [];
+    if (skipped.length) parts.push(tn('toast.saved_all_skipped', skipped.length));
+    if (failed.length) parts.push(tr('toast.saved_all_failed', { n: failed.length, first: failed[0] }));
     const actions = [];
     if (skipped.length) {
-      actions.push({ label: '건너뛴 문서 저장…', run: async () => { if (switchTo(skipped[0])) await save(true); } });
+      actions.push({ label: tr('toast.action.save_skipped'), run: async () => { if (switchTo(skipped[0])) await save(true); } });
     }
     hooks.toast(parts.join(' · '), failed.length ? 'failed' : '', actions);
   }
@@ -2484,7 +2513,7 @@ export function createEditor(host, hooks) {
   async function dropPaths(paths) {
     if (S.cur || S.fx) return;
     const list = await addAndOpen(paths);
-    if (!list.length) hooks.toast('PNG 파일을 찾지 못했습니다', 'failed');
+    if (!list.length) hooks.toast(tr('toast.no_png'), 'failed');
   }
 
   // ---------- 키보드 ----------
@@ -2627,6 +2656,23 @@ export function createEditor(host, hooks) {
     currentPath: () => S.doc?.path || '',
     // 일괄 처리 목록이 바뀌었을 때(추가·제거·필터·썸네일 갱신) 파일 띠를 다시 그립니다.
     filesChanged: () => R.strip.render(),
+    // Called by main.js after the language changed and the Go language has been updated:
+    // re-applies every label and re-renders the dynamic parts (the effect preview is recomputed in the new language).
+    relocalize() {
+      relabel();
+      closeMenu();
+      syncTools();
+      syncColors();
+      syncTop();
+      syncSel();
+      renderInfo(false);
+      renderPal();
+      syncDocs(true);
+      if (S.fx) {
+        S.fx.showOrig = false;
+        buildFxPanel(S.fx);
+      }
+    },
     activate(on) {
       S.active = on;
       if (on) {

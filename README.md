@@ -1,6 +1,8 @@
 # sprite-tools
 
-픽셀 아트 PNG를 일괄 처리하는 도구입니다. 명령줄(CLI)과 GUI 두 가지로 쓸 수 있으며, 둘은 같은 처리 코드를 공유합니다.
+English | [한국어](README.ko.md)
+
+A tool for batch-processing pixel art PNGs. It comes as a command-line tool (CLI) and as a GUI, and both share the same processing code.
 
 ```
 go build -o sprite-tools.exe .
@@ -9,112 +11,121 @@ sprite-tools help
 
 ## GUI
 
-`gui/` 폴더에 [Wails](https://wails.io) 기반 데스크톱 앱이 있습니다.
+The `gui/` folder contains a desktop app based on [Wails](https://wails.io).
 
-| 일괄 처리 | 편집기 |
+| Batch | Editor |
 | --- | --- |
-| ![일괄 처리 - 색상 줄이기](docs/screenshots/batch-reduce.png) | ![편집기](docs/screenshots/editor.png) |
+| ![Batch - Reduce colors](docs/screenshots/batch-reduce.png) | ![Editor](docs/screenshots/editor.png) |
 
-![일괄 처리 - 시트 합치기](docs/screenshots/batch-pack.png)
+![Batch - Pack sheet](docs/screenshots/batch-pack.png)
 
 ```
 cd gui
 wails build        # → gui/build/bin/sprite-tools-gui.exe
-wails dev          # 개발 모드 (화면 수정 시 자동 갱신)
+wails dev          # development mode (the UI refreshes when you edit it)
 ```
 
-- PNG 파일이나 폴더를 창에 끌어다 놓아 추가 (하위 폴더 포함 여부 선택)
-- 위쪽 탭: 색상 줄이기 · 팔레트 적용 · 인덱스 PNG · 팔레트 추출 | 1:1 축소 · 확대 · 여백 자르기 · 조각 지우기 | 프레임 자르기 · 시트 합치기
-- 조각 지우기: 투명하지 않은 픽셀이 이어진 덩어리 중 기준(기본 4픽셀)보다 작은 것을 투명하게 지워 남은 얼룩을 정리합니다. 대각선 포함(8방향) 선택, 미리보기 지원, 지울 조각이 없으면 건너뜀
-- 원본/결과 미리보기: 옵션을 바꾸면 바로 갱신되며, 픽셀이 뭉개지지 않게 정수 배율로 확대
-- 결과 색상 견본, 팔레트 견본, Lospec 팔레트 불러오기
-- 저장 방식: 원본 옆에 새 파일 / 다른 폴더에 저장(폴더에서 찾은 파일은 하위 폴더 구조 유지, 접미사는 비워도 됨) / 원본 덮어쓰기
-- 팔레트 추출: 결과 칸에 추출된 색 견본이 보이며, 이름을 주면 '팔레트 적용'의 팔레트 목록에도 바로 저장
-- 시트 합치기: 목록의 모든 파일을 이름의 숫자 순서(frame-2, frame-10)로 합친 시트를 미리보고, 실행하면 저장 위치를 물어봄
-- 원본 덮어쓰기 전 백업(기본 켜짐): 각 파일 옆 `.sprite-tools-backup/<실행 시각>/` 에 원본을 복사해 두고, 실행이 끝난 알림의 `되돌리기` 로 한 번에 복원 (`백업 폴더 열기` 도 제공). 건너뛰거나 실패한 파일의 백업은 남기지 않음
-- 미리보기 검사: 원본/결과 위에 마우스를 올리면 캡션에 픽셀 좌표 `x, y` 와 색상 `#rrggbb`·알파 표시. 결과 창을 누르고 있거나 `Space` 를 누르는 동안 원본을 보여주는 비교, 확대 시 두 창의 스크롤 동기화, `Ctrl+휠` 로 확대 단계(맞춤 · 1x · 2x · 4x · 8x · 16x) 변경
-- 파일 목록 필터: 이름으로 걸러 보기(`Ctrl+F`, `Esc` 로 지움). 필터 중에도 실행은 기본적으로 목록 전체이며(버튼에 `전체 n개` 표시), `보이는 n개만 실행` 을 체크하면 보이는 파일만 처리
-- 실행 후 알림의 `결과를 목록에 추가` 로 만들어진 파일(프레임 자르기·시트 합치기 결과 포함)을 바로 목록에 추가
-- 진행률 표시, 취소(Esc), 결과 폴더 열기
-- 단축키: `Ctrl+Enter` 실행, `Esc` 취소/닫기, `Alt+1~9`, `Alt+0`(열 번째) 탭 순서대로 명령 전환, `↑/↓` 파일 이동, `Delete` 목록에서 제거, `Ctrl+F` 파일 필터, `Space` 누르는 동안 원본 비교, `Ctrl+휠` 확대, `F1`/`?` 단축키 도움말 (상단 `?` 버튼도 같음)
-- 설정은 다음 실행 때도 유지됩니다
+- Drag PNG files or folders onto the window to add them (subfolders can be included or not)
+- Tabs along the top: Reduce colors · Apply palette · Indexed PNG · Extract palette | Downscale 1:1 · Upscale · Trim margins · Despeckle | Slice frames · Pack sheet
+- Despeckle: erases connected groups of non-transparent pixels that are smaller than a threshold (4 pixels by default) to clean up leftover specks. Diagonal neighbors (8-way) can be counted as connected, the result can be previewed, and images with nothing to erase are skipped
+- Original/result preview: updates immediately when you change an option, and is enlarged by integer factors so pixels are never blurred
+- Result color swatches, palette swatches, loading palettes from Lospec
+- Save modes: as a new file next to the original / to another folder (files found in a folder keep their subfolder structure, the suffix may be empty) / overwrite the original
+- Extract palette: the extracted color swatches appear in the result pane, and if you give a name the palette is saved straight to the palette list of 'Apply palette'
+- Pack sheet: previews a sheet made of all files in the list, ordered by the numbers in their names (frame-2, frame-10); running it asks where to save
+- Backup before overwriting (on by default): copies each original into `.sprite-tools-backup/<run time>/` next to the file, and the notification after the run offers `Undo` to restore everything at once (plus `Open backup folder`). Backups of skipped or failed files are not kept
+- Preview inspection: hover over the original/result to see the pixel coordinates `x, y` and the color `#rrggbb` with alpha in the caption. Holding the result pane or pressing `Space` shows the original for comparison, the two panes scroll together when zoomed, and `Ctrl`+wheel changes the zoom step (Fit · 1x · 2x · 4x · 8x · 16x)
+- File list filter: narrow the list by name (`Ctrl+F`, `Esc` clears it). Running still processes the whole list by default while a filter is active (the button shows `all n files`); tick `Run on the n visible files only` to process just the visible ones
+- `Add result to list` in the notification after a run adds the files that were created (including the results of Slice frames and Pack sheet) to the list
+- Progress display, cancel (Esc), open the result folder
+- Shortcuts: `Ctrl+Enter` run, `Esc` cancel/close, `Alt+1~9` and `Alt+0` (tenth) switch command in tab order, `↑/↓` move between files, `Delete` remove from the list, `Ctrl+F` file filter, `Space` hold to compare with the original, `Ctrl`+wheel zoom, `F1`/`?` shortcut help (the `?` button in the top bar does the same)
+- Settings are kept for the next launch
+- Language: change it with the language selector at the right of the top bar (English · 한국어). The first launch is in English (the operating system language is not followed) and the choice is remembered. Besides the on-screen text, the texts produced by the Go side — result messages, errors and native file dialogs — change too
 
-### 편집기
+### Editor
 
-위쪽 `편집기` 탭(또는 `Ctrl+2`)에서 PNG 를 직접 고칠 수 있습니다. 여러 파일을 열어 두고 연달아 고치는 작업을 염두에 두었으며, 왼쪽 파일 띠에서 고르거나 목록의 파일을 더블클릭하거나 `열기…` / `새로 만들기` 로 시작합니다. 픽셀은 Go에서 정밀한 RGBA로 읽고 쓰며, 원본이 인덱스 PNG였고 색이 256개 이하면 저장할 때도 인덱스 PNG(팔레트 순서 유지)로 저장합니다.
+Open the `Editor` tab at the top (or press `Ctrl+2`) to edit PNGs directly. It is designed for opening several files and working through them one after another: pick a file from the file strip on the left, double-click a file in the list, or start with `Open…` / `New`. Pixels are read and written as exact RGBA in Go, and if the original was an indexed PNG with 256 colors or fewer it is saved as an indexed PNG again (palette order preserved).
 
-- 도구: 연필(`B`) · 지우개(`E`) · 채우기(`G`, 이어진 영역/전체 같은 색, 허용 오차) · 스포이트(`I`, 어느 도구에서나 `Alt`+클릭) · 선(`L`) · 사각형(`U`) · 타원(`Shift+U`) · 사각형 선택(`M`) · 마법봉(`W`) · 이동(`V`). 브러시 크기 `[` `]`, 사각/원형 브러시, 픽셀 퍼펙트, 가로/세로 대칭 그리기. 왼쪽 버튼은 주 색, 오른쪽 버튼은 보조 색(`X` 로 교체)
-- 선택 영역: 드래그로 선택, `Shift` 더하기 · `Alt` 빼기(마스크 방식이라 모양이 사각형이 아니어도 됨), `Ctrl+A` 전체 · `Ctrl+D` 해제 · `Ctrl+Shift+I` 반전, 움직이는 점선 윤곽선. 선택이 있으면 모든 그리기 도구가 선택된 픽셀만 바꿉니다
-- 마법봉(`W`): 클릭한 픽셀과 같은 색인 이어진 영역(기본 상하좌우 4방향, 옵션으로 대각선까지 8방향)을 선택합니다. `전체 같은 색` 을 켜면 이어지지 않아도 이미지 전체의 같은 색을 선택하고, 허용 오차 슬라이더는 채우기와 공유합니다(0 = 정확히 같은 색). 완전히 투명한 픽셀(알파 0)은 RGB 와 상관없이 모두 같은 색으로 봅니다. `Shift` 더하기 · `Alt` 빼기, 이미지 밖 클릭은 선택 해제. 만들어진 선택은 사각형 선택과 같은 마스크라서 `Delete` · 이동 · 복사 · 이미지 메뉴가 그대로 동작합니다 (남은 얼룩 지우기: `W` → 얼룩 클릭 → `Delete`)
-- 이동·클립보드: 선택 안쪽을 끌거나 이동 도구·방향키(`Shift` 10px)로 옮기면 선택한 픽셀이 떠 있는 층이 되고, `Enter`/바깥 클릭으로 확정(실행 취소 한 단계), `Esc` 로 취소. `Ctrl+C` / `Ctrl+X` / `Ctrl+V`(붙여넣으면 떠 있는 선택), `Delete` 로 선택 픽셀 지우기. 클립보드는 앱 안에서만 쓰입니다
-- 이미지 메뉴: 가로/세로 뒤집기(`Shift+H` / `Shift+V`), 90° 회전·180° 회전(선택이 있으면 선택한 픽셀만 중심 기준으로), 캔버스 크기(9방향 기준점), 선택 영역으로 자르기, 여백 자르기(`trim` 과 같은 기준)
-- 효과 메뉴: 색상 줄이기(병합 강도/최대 색상 수) · 팔레트 적용 · 1:1 축소 · 확대 · 작은 조각 지우기를 현재 이미지에 적용합니다. 일괄 처리와 같은 처리 코드를 쓰며, 옵션을 바꿀 때마다 캔버스에 미리 보고(`원본 보기` 로 비교), `확인`/`취소` 로 적용하거나 되돌립니다. 결과는 실행 취소 한 단계. 작은 조각 지우기만은 선택 영역이 있으면 그 안쪽 픽셀만 지웁니다(조각은 이미지 전체에서 찾고, 처리 결과와 원본을 선택 마스크로 합쳐 적용). 나머지 효과는 선택과 상관없이 이미지 전체에 적용됩니다
-- 팔레트 패널: 내 팔레트(`현재 색 추가`/`선택한 색 제거`, 다음 실행 때도 유지) · `이미지에서`(많이 쓴 색 순, 최대 256색) · 저장된 팔레트 · Lospec 이름으로 불러오기 · PNG 파일. 왼쪽 클릭 = 주 색, 오른쪽 클릭 = 보조 색, 마우스를 올리면 hex 표시, 주 색과 같은 칸은 강조. `팔레트로 저장…` 은 `extract -save` 와 같은 팔레트 폴더에 저장하므로 일괄 처리의 `팔레트 적용`에서도 바로 보입니다(같은 이름은 확인 후 덮어쓰기)
-- 보기: 확대/축소(`Ctrl+휠`, `+` `-`, `0` 맞춤, `1` 100%), `Space`+드래그 이동, 픽셀 격자(`#`), 타일 격자, 내비게이터
-- 파일: `Ctrl+O` 열기 · `Ctrl+N` 새로 만들기 · `Ctrl+S` 저장 · `Ctrl+Shift+S` 다른 이름으로(덮어쓰기 전 원본 백업 선택 가능). `Ctrl+Z` / `Ctrl+Y` 로 실행 취소(문서마다 최대 200단계)
+- Tools: Pencil (`B`) · Eraser (`E`) · Fill (`G`, contiguous / all same color, tolerance) · Color picker (`I`, or `Alt`+click from any tool) · Line (`L`) · Rectangle (`U`) · Ellipse (`Shift+U`) · Rectangle select (`M`) · Magic wand (`W`) · Move (`V`). Brush size `[` `]`, square/round brush, pixel perfect, horizontal/vertical symmetry drawing. The left button draws with the primary color, the right button with the secondary color (`X` swaps them)
+- Selection: drag to select, `Shift` adds · `Alt` subtracts (it is a mask, so the shape need not be a rectangle), `Ctrl+A` select all · `Ctrl+D` deselect · `Ctrl+Shift+I` invert, with an animated dashed outline. While a selection exists, every drawing tool only changes the selected pixels
+- Magic wand (`W`): selects the contiguous area of the clicked pixel's color (4-way by default, 8-way with the diagonal option). With `All same color` it selects every pixel of that color in the image, contiguous or not, and the tolerance slider is shared with Fill (0 = exactly the same color). Fully transparent pixels (alpha 0) all count as the same color regardless of RGB. `Shift` adds · `Alt` subtracts, and clicking outside the image deselects. The selection is the same mask as a rectangle selection, so `Delete`, move, copy and the Image menu work as usual (to erase leftover specks: `W` → click the speck → `Delete`)
+- Move and clipboard: dragging inside the selection, or using the Move tool or the arrow keys (`Shift` for 10px), turns the selected pixels into a floating layer; `Enter` or a click outside commits it (one undo step), `Esc` cancels. `Ctrl+C` / `Ctrl+X` / `Ctrl+V` (a paste becomes a floating selection), `Delete` clears the selected pixels. The clipboard works only inside the app
+- Image menu: flip horizontally/vertically (`Shift+H` / `Shift+V`), rotate 90° / 180° (with a selection, only the selected pixels, around their center), canvas size (9 anchor points), crop to selection, trim margins (same rule as `trim`)
+- Effects menu: applies Reduce colors (merge strength / max colors) · Apply palette · Downscale 1:1 · Upscale · Despeckle to the current image. It uses the same processing code as batch mode; every option change is previewed on the canvas (compare with `Show original`), and `OK` / `Cancel` applies or reverts it. The result is one undo step. Only Despeckle respects the selection: with a selection, only pixels inside it are erased (pieces are still found across the whole image, and the processed result and the original are combined through the selection mask). The other effects apply to the whole image regardless of the selection
+- Palette panel: My palette (`Add current color` / `Remove selected color`, kept for the next launch) · `From image` (most used colors first, up to 256) · saved palettes · load by Lospec name · PNG file. Left click = primary color, right click = secondary color, hovering shows the hex value, and the swatch equal to the primary color is highlighted. `Save as palette…` saves to the same palette folder as `extract -save`, so the palette also shows up right away in `Apply palette` in batch mode (an existing name is overwritten after confirmation)
+- View: zoom (`Ctrl`+wheel, `+` `-`, `0` fit, `1` 100%), `Space`+drag to pan, pixel grid (`#`), tile grid, navigator
+- Files: `Ctrl+O` open · `Ctrl+N` new · `Ctrl+S` save · `Ctrl+Shift+S` save as (the original can be backed up before overwriting). `Ctrl+Z` / `Ctrl+Y` undo/redo (up to 200 steps per document)
 
-#### 여러 파일 연속 작업
+#### Working through several files
 
-- 문서(탭): 열어 둔 이미지마다 픽셀·크기·실행 취소 기록·선택·확대/위치·저장 상태를 따로 가지므로, 저장하지 않고도 즉시 오갈 수 있습니다. 도구·색·도구 옵션·팔레트·격자 설정은 모든 문서가 공유합니다. 캔버스 위 탭에는 이름, 저장하지 않은 변경 표시(●), 닫기(×)가 있고 가운데 버튼·`Ctrl+W` 로 닫습니다(고친 문서는 저장 / 저장 안 함 / 취소를 물음). `Ctrl+Tab` / `Ctrl+Shift+Tab` 으로 탭을 순환하고, 탭이 많으면 가로로 스크롤되며 현재 탭이 항상 보입니다. `정리` 버튼은 수정하지 않은 탭을 한꺼번에 닫습니다. 문서를 바꿀 때 떠 있는 층은 확정됩니다
-- 미리보기 탭: 파일 띠에서 클릭하거나 `PageDown` 등으로 연 파일은 이탤릭 `미리보기 탭` 이 됩니다. 수정하지 않았다면 다음에 같은 방식으로 여는 파일이 그 탭을 대신하므로 파일 100개를 훑어도 탭이 쌓이지 않습니다. 고치면(떠 있는 층 포함) 자동으로 고정되어 계속 남고, 탭이나 파일 띠 항목을 더블클릭해도 고정됩니다. `열기…`·`새로 만들기` 로 연 문서는 처음부터 고정됩니다
-- 파일 띠: 도구 막대 오른쪽의 접을 수 있는 목록으로 **일괄 처리 목록과 같은 파일**(오류 파일 제외)을 썸네일로 보여 주며, 현재 파일 강조 · 열려 있는 파일(파란 이름) · 저장 안 한 변경(●) 표시와 이름 필터(일괄 처리의 필터와 같은 값)가 있습니다. `＋ 파일` / `＋ 폴더` 를 누르거나 편집기에 파일·폴더를 끌어다 놓으면 공유 목록에 더해지고 첫 파일이 열립니다. 일괄 처리에서 목록을 바꾸면 띠에도 바로 반영되고(반대도 마찬가지), 목록에서 지워도 고친 채 열려 있는 문서는 탭으로 남습니다
-- 이동: `PageDown` / `PageUp` 또는 `Alt+→` / `Alt+←` 로 띠 순서의 다음·이전 파일을 엽니다(어느 도구에서나, 글자를 입력하는 칸에서는 제외). 끝에서는 `마지막 파일입니다` 알림만 나옵니다. 파일 띠 아래의 옵션: `넘어갈 때 자동 저장`(고친 파일을 먼저 저장하고 넘어감, 백업 설정 적용, 저장 실패 시 넘어가지 않음) · `확대 유지`(새로 연 파일에 이전 파일의 확대 배율을 그대로 사용하고, 크기가 같으면 위치도 유지). 두 옵션은 다음 실행 때도 유지됩니다
-- 모두 저장(`Ctrl+Alt+S`): 저장하지 않은 문서를 모두 저장하고 개수·백업 수를 알립니다. 경로가 없는 새 문서(제목 없음)는 저장 대화상자를 연달아 띄우지 않고 건너뛰며, 알림의 `건너뛴 문서 저장…` 으로 따로 저장할 수 있습니다. 하나가 실패해도 나머지는 계속 저장하고, 저장한 파일은 일괄 처리 목록의 크기·썸네일도 갱신됩니다
-- 실행 취소 기록은 열린 문서가 메모리 256MB 를 나눠 씁니다. 넘치면 가장 오래 쓰지 않은 문서의 오래된 단계부터 버리며(저장 상태는 유지), 문서마다 최대 200단계입니다
-- 창을 닫을 때는 `저장하지 않은 문서 N개` 로 한 번 더 확인하고, 상단 `편집기` 탭의 ●도 하나라도 고친 문서가 있으면 켜집니다
+- Documents (tabs): every open image keeps its own pixels, size, undo history, selection, zoom/position and saved state, so you can switch between them instantly without saving. Tools, colors, tool options, the palette and grid settings are shared by all documents. A tab above the canvas has the name, an unsaved-changes mark (●) and a close button (×); close it with the middle button or `Ctrl+W` (a modified document asks to save / don't save / cancel). `Ctrl+Tab` / `Ctrl+Shift+Tab` cycle through the tabs; with many tabs the bar scrolls horizontally and the current tab always stays visible. The `Clean up` button closes all unmodified tabs at once. A floating layer is committed when you switch documents
+- Preview tabs: a file opened by clicking in the file strip, with `PageDown` and so on, becomes an italic preview tab. As long as you have not modified it, the next file opened the same way takes its place, so browsing 100 files does not pile up tabs. Modifying it (including a floating layer) keeps it automatically, and double-clicking the tab or the file strip entry keeps it too. Documents opened with `Open…` or `New` are kept from the start
+- File strip: a collapsible list to the right of the toolbar that shows **the same files as the batch list** (files with errors excluded) as thumbnails, with the current file highlighted, open files (blue name), an unsaved-changes mark (●) and a name filter (the same value as the filter in batch mode). Press `+ Files` / `+ Folder`, or drop files or folders on the editor, to add them to the shared list and open the first one. Changing the list in batch mode is reflected in the strip right away (and vice versa); a modified document that is still open stays as a tab even if you remove it from the list
+- Moving on: `PageDown` / `PageUp` or `Alt+→` / `Alt+←` open the next/previous file in strip order (from any tool, except while typing in a text field). At either end you only get the `This is the last file` notice. Options below the file strip: `Auto-save when moving on` (saves a modified file first and then moves on; the backup setting applies, and it does not move on if saving fails) · `Keep zoom` (a newly opened file uses the previous file's zoom, and the position too if the size is the same). Both options are kept for the next launch
+- Save all (`Ctrl+Alt+S`): saves every unsaved document and reports how many were saved and backed up. New documents without a path (Untitled) are skipped instead of opening a series of save dialogs, and the `Save skipped documents…` button in the notification lets you save them separately. If one fails the others are still saved, and saved files also refresh their size and thumbnail in the batch list
+- The undo history of all open documents shares 256MB of memory. When it overflows, the oldest steps of the least recently used document are dropped first (the saved state is preserved), and each document keeps at most 200 steps
+- Closing the window asks once more with `N unsaved documents`, and the ● on the top `Editor` tab lights up if any document has been modified
 
-빌드에는 Go, Node.js, Wails CLI(`go install github.com/wailsapp/wails/v2/cmd/wails@latest`)가 필요하며, 실행에는 WebView2(Windows 10/11 기본 포함)가 필요합니다.
+Building requires Go, Node.js and the Wails CLI (`go install github.com/wailsapp/wails/v2/cmd/wails@latest`), and running requires WebView2 (included by default in Windows 10/11).
 
-## 명령
+## Commands
 
-| 명령 | 별칭 | 설명 | 기본 출력 |
+| Command | Alias | Description | Default output |
 | --- | --- | --- | --- |
-| `reduce` | `rd` | 비슷한 색상을 합쳐 색상 수를 줄임 (`-t` 로 강도 조절, `-k 16` 으로 최대 색상 수 지정) | `*-reduced.png` |
-| `recolor` | `rc` | Lospec 팔레트 또는 팔레트 PNG의 색으로 변환 (`-p`) | `*-recolored.png` |
-| `index` | `ix` | 인덱스(팔레트) PNG로 변환, 0번 색을 투명으로 고정 | `*-indexed.png` |
-| `extract` | `ex` | 이미지의 색을 팔레트 PNG(색 1개 = 1px, 한 줄)로 추출. 많이 쓴 색 순, 256색 초과 시 실패. `-save <이름>` 으로 팔레트 폴더에도 저장 | `*-palette.png` |
-| `downscale` | `ds` | 확대된 픽셀 아트를 1:1로 축소 (자동 감지, `-scale` 로 지정) | `*-downscaled.png` |
-| `upscale` | `us` | 정수 배율 최근접 확대 (`-scale 2~32`, 기본 2) | `*-upscaled.png` |
-| `trim` | `tr` | 투명한 바깥 여백을 잘라냄 (`-pad N` 으로 사방에 투명 여백 추가) | `*-trimmed.png` |
-| `despeckle` | `dsp` | 떨어져 있는 작은 조각(얼룩)을 투명하게 지움. 이어진 덩어리가 `-min N`(기본 4)픽셀보다 작으면 제거, `-diagonal=false` 로 대각선 연결을 끌 수 있음 | `*-clean.png` |
-| `slice` | `sl` | 스프라이트 시트를 프레임으로 자름 (`-size 16` / `-size 16x24`) | `*-0001.png` … |
-| `pack` | `pk` | 여러 이미지를 한 장의 시트로 합침 (`slice` 의 반대). `-cols`, `-gap`, `-align center`, 출력 `-o <파일.png>` 필수 | `-o` 로 지정한 파일 |
+| `reduce` | `rd` | Merges similar colors to reduce the color count (`-t` sets the strength, `-k 16` sets the max number of colors) | `*-reduced.png` |
+| `recolor` | `rc` | Converts to the colors of a Lospec palette or a palette PNG (`-p`) | `*-recolored.png` |
+| `index` | `ix` | Converts to an indexed (palette) PNG and fixes color 0 as transparent | `*-indexed.png` |
+| `extract` | `ex` | Extracts the image's colors into a palette PNG (1 color = 1px, a single row). Most used colors first; fails above 256 colors. `-save <name>` also saves it to the palette folder | `*-palette.png` |
+| `downscale` | `ds` | Scales enlarged pixel art back down 1:1 (auto-detected, or set with `-scale`) | `*-downscaled.png` |
+| `upscale` | `us` | Integer nearest-neighbor enlargement (`-scale 2~32`, default 2) | `*-upscaled.png` |
+| `trim` | `tr` | Crops the transparent outer margin (`-pad N` adds a transparent margin on every side) | `*-trimmed.png` |
+| `despeckle` | `dsp` | Erases small detached pieces (specks). A connected group smaller than `-min N` (default 4) pixels is removed; `-diagonal=false` turns off diagonal connections | `*-clean.png` |
+| `slice` | `sl` | Cuts a sprite sheet into frames (`-size 16` / `-size 16x24`) | `*-0001.png` … |
+| `pack` | `pk` | Combines several images into one sheet (the opposite of `slice`). `-cols`, `-gap`, `-align center`, and the output `-o <file.png>` is required | the file given with `-o` |
 
-명령은 별칭 외에도 겹치지 않는 앞부분으로 줄여 쓸 수 있습니다 (`red` → reduce, `dow` → downscale, `de` → despeckle). `d` 는 downscale 과 despeckle 에 모두 맞아 더는 쓸 수 없고, `ds` 는 downscale · `dsp` 는 despeckle 의 별칭입니다.
-이전 이름(`simplify`, `split`, `palette`, `palette-convert`)도 계속 동작합니다.
+Besides the aliases, a command can be shortened to any prefix that is unambiguous (`red` → reduce, `dow` → downscale, `de` → despeckle). `d` matches both downscale and despeckle and can no longer be used; `ds` is the alias of downscale and `dsp` the alias of despeckle.
+The old names (`simplify`, `split`, `palette`, `palette-convert`) still work.
 
-## 공통 옵션
+## Language
 
-`pack` 을 뺀 파일별 명령(reduce, recolor, index, extract, downscale, upscale, trim, despeckle)에 해당합니다.
+The default language is English. The operating system language is not detected automatically.
 
-- `[경로...]` 파일·폴더를 여러 개 지정 가능. 생략하면 현재 폴더의 PNG.
-- `-i` 폴더 탐색 시 파일 이름 패턴 (기본 `*.png`)
-- `-r` 하위 폴더까지 탐색
-- `-s` 출력 파일 접미사 / `-w` 원본 덮어쓰기 (`extract` 는 `-w` 없음)
-- `-backup` `-w` 로 덮어쓰기 전에 원본을 `<파일 폴더>/.sprite-tools-backup/<실행 시각 YYYYMMDD-HHMMSS>/<이름>` 에 복사 (`-w` 와 함께 쓰기를 권장, 기본은 꺼짐). 건너뛰거나 실패한 파일의 백업은 지우며, 백업이 남은 폴더는 종료 시 요약에 출력. 숨김 폴더(`.` 시작)라 이후 탐색에서 제외됨. 되돌리려면 백업 파일을 원래 자리로 복사
-- `-o <폴더>` 결과를 다른 폴더에 저장. 폴더로 지정한 경로 아래에서 찾은 파일은 그 폴더 기준의 하위 경로를 유지하고(같은 이름이 달라도 겹치지 않음), 파일로 직접 지정한 경우에는 출력 폴더 바로 아래에 저장. 폴더는 자동으로 만들며 `-w` 와는 함께 쓸 수 없음.
-  접미사는 비워도 되지만(`-s ""`), 출력이 원본과 같은 경로가 되는 파일은 실패로 처리해 원본을 지키며, 출력 폴더 안쪽 파일은 탐색에서 제외
-- `-n` 실제 처리 없이 대상 파일과 실제 출력 경로만 미리보기
-- `-j` 동시 처리 스레드 수
+- CLI: `--lang ko` (anywhere before or after the command) or the environment variable `SPRITE_TOOLS_LANG=ko`. If both are given, `--lang` wins. Help, progress, summaries and errors all appear in the chosen language.
+- GUI: the language selector in the top bar. The choice is saved and kept for the next launch.
+- Adding a language: see [docs/TRANSLATING.md](docs/TRANSLATING.md). It takes two translation files (JSON).
 
-(`slice` 의 `-o` 는 프레임을 저장할 폴더이고, `pack` 의 `-o` 는 저장할 시트 파일입니다.)
+## Common options
 
-이전 실행의 출력 파일(같은 접미사)은 자동으로 대상에서 제외되며, 저장은 임시 파일을 거쳐 원자적으로 이뤄집니다.
-처리 중 실패한 파일이 있으면 종료 코드 1, 잘못된 사용법이면 2를 반환합니다.
+These apply to the per-file commands (reduce, recolor, index, extract, downscale, upscale, trim, despeckle), i.e. everything except `pack`.
+
+- `[path...]` Files and folders, as many as you like. If omitted, the PNGs in the current folder.
+- `-i` File name pattern when scanning folders (default `*.png`)
+- `-r` Scan subfolders too
+- `-s` Output file suffix / `-w` overwrite the original (`extract` has no `-w`)
+- `-backup` Copies the original to `<file folder>/.sprite-tools-backup/<run time YYYYMMDD-HHMMSS>/<name>` before `-w` overwrites it (recommended together with `-w`; off by default). Backups of skipped or failed files are deleted, and folders that still hold backups are listed in the summary at the end. It is a hidden folder (starts with `.`), so later scans skip it. To undo, copy the backup files back to their original place
+- `-o <folder>` Save the results to another folder. Files found under a folder you passed keep their subpath relative to that folder (so equal names in different folders do not collide); files you passed directly are saved right under the output folder. The folder is created automatically and cannot be combined with `-w`.
+  The suffix may be empty (`-s ""`), but a file whose output would be the same path as the original is treated as a failure to protect the original, and files inside the output folder are excluded from scanning
+- `-n` Preview only the target files and their actual output paths, without processing anything
+- `-j` Number of parallel threads
+
+(For `slice`, `-o` is the folder the frames are saved to, and for `pack` it is the sheet file to write.)
+
+Output files of a previous run (with the same suffix) are excluded from the targets automatically, and saving goes through a temporary file so it is atomic.
+The exit code is 1 if any file failed during processing, and 2 for invalid usage.
 
 ## pack
 
 ```
-sprite-tools pack frames -o sheet.png                   # 폴더의 모든 PNG
+sprite-tools pack frames -o sheet.png                   # every PNG in the folder
 sprite-tools pk frames -cols 4 -gap 1 -align center -o sheet.png
 ```
 
-- 입력은 자연 정렬 순서(`frame-2` < `frame-10`)로 합치며, 칸 크기는 가장 큰 너비 × 가장 큰 높이입니다. 작은 이미지는 칸의 왼쪽 위(`-align center` 면 가운데)에 놓입니다.
-- `-cols 0` 이면 개수의 제곱근을 올림한 열 수, `-gap` 은 칸 사이 투명 간격입니다.
-- 입력 파일을 덮어쓰는 출력은 항상 거부하고, 이미 있는 다른 파일은 `-force` 가 있어야 덮어씁니다. 폴더를 훑다가 같은 출력 파일이 잡히면 입력에서 뺍니다.
-- 완료되면 `12프레임 → 4x3 시트, 64x48` 처럼 요약을 출력합니다.
+- Inputs are combined in natural sort order (`frame-2` < `frame-10`), and the cell size is the largest width × the largest height. Smaller images sit in the top left of their cell (in the middle with `-align center`).
+- `-cols 0` uses the square root of the count, rounded up, as the number of columns, and `-gap` is the transparent gap between cells.
+- An output that would overwrite an input file is always refused, and another existing file is only overwritten with `-force`. If the same output file is picked up while scanning a folder, it is dropped from the inputs.
+- When done it prints a summary such as `Frames: 12 → 4x3 grid, sheet 64x48`.
 
-## 예시
+## Examples
 
 ```
 sprite-tools rd hero.png -t 0.08
@@ -127,6 +138,7 @@ sprite-tools pk frames -o sheet.png
 sprite-tools ex hero.png -save hero-colors
 sprite-tools rc -p hero-colors enemy.png
 sprite-tools rc -p otterisk-96 -n
+sprite-tools --lang ko help
 ```
 
-다운로드하거나 `extract -save` 로 저장한 팔레트는 사용자 폴더(`%APPDATA%\sprite-tools\palettes`)에 보관되어 CLI와 GUI가 함께 씁니다. 실행 파일 옆에 `palettes/` 폴더가 있으면 그쪽도 함께 찾습니다 (`recolor -list`).
+Palettes you download or save with `extract -save` are kept in the user folder (`%APPDATA%\sprite-tools\palettes`) and shared by the CLI and the GUI. If there is a `palettes/` folder next to the executable it is searched as well (`recolor -list`).

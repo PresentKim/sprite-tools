@@ -65,7 +65,7 @@ p { margin: 0; }
 
 /* 상단 */
 .topbar {
-  display: flex; align-items: center; gap: 14px;
+  display: flex; align-items: center; gap: 12px;
   padding: 0 12px; height: 48px;
   background: var(--panel); border-bottom: 1px solid var(--line);
 }
@@ -81,10 +81,10 @@ p { margin: 0; }
 }
 .tabs { display: flex; align-items: center; gap: 0; height: 100%; min-width: 0; flex: 1; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
 .tabs::-webkit-scrollbar { display: none; }
-.tab-sep { width: 1px; height: 18px; margin: 0 8px; background: var(--line); flex: none; }
+.tab-sep { width: 1px; height: 18px; margin: 0 6px; background: var(--line); flex: none; }
 .tab {
   display: flex; align-items: center; gap: 6px;
-  padding: 0 9px; height: 100%; border: 0; background: none; color: var(--muted);
+  padding: 0 7px; height: 100%; border: 0; background: none; color: var(--muted);
   font: inherit; cursor: pointer; border-bottom: 2px solid transparent; white-space: nowrap; flex: none;
 }
 .tab:hover { color: var(--text); }
@@ -179,6 +179,7 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); margi
   background: none; color: var(--muted); font: inherit; font-weight: 700; line-height: 1; cursor: pointer;
 }
 .icon-btn:hover { color: var(--text); border-color: var(--accent); }
+.lang-select { flex: none; width: auto; padding: 3px 6px; font-size: 12px; cursor: pointer; }
 .no-match { padding: 24px 16px; text-align: center; color: var(--muted); }
 
 /* 파일 목록 */

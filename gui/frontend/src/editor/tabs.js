@@ -1,15 +1,19 @@
 // 문서 탭 막대. 상태는 편집기가 갖고, 여기서는 그려 주고 클릭만 알립니다.
 // 탭: 이름 + 저장 안 한 변경 점(●) + 닫기(×). 미리보기 탭(탐색으로 연 탭)은 이름이 기울어집니다.
-import { el } from './ui.js';
+import { t as tr } from '../i18n/index.js';
+import { el, localized } from './ui.js';
 
 // cb: { activate(id), close(id), pin(id), closeClean() }
 export function createTabs(cb) {
   const root = el('div', 'ed-tabbar');
   const list = el('div', 'ed-tabs');
   list.setAttribute('role', 'tablist');
-  const clean = el('button', 'ed-tabs-clean', '정리');
+  const clean = el('button', 'ed-tabs-clean');
   clean.type = 'button';
-  clean.title = '수정하지 않은(저장된) 탭을 모두 닫기';
+  localized(() => {
+    clean.textContent = tr('editor.tabs.clean');
+    clean.title = tr('editor.tabs.clean.title');
+  });
   clean.onclick = () => { cb.closeClean(); clean.blur(); };
   root.append(list, clean);
 
@@ -28,11 +32,11 @@ export function createTabs(cb) {
     tab.dataset.id = String(id);
     const name = el('span', 'ed-tab-name ellipsis');
     const dot = el('span', 'ed-tab-dot', '●');
-    dot.title = '저장하지 않은 변경 사항';
+    dot.title = tr('editor.unsaved');
     const x = el('button', 'ed-tab-x', '×');
     x.type = 'button';
-    x.title = '탭 닫기 (Ctrl+W, 가운데 버튼)';
-    x.setAttribute('aria-label', '탭 닫기');
+    x.title = tr('editor.tabs.close.title');
+    x.setAttribute('aria-label', tr('editor.tabs.close.aria'));
     x.onclick = (e) => { e.stopPropagation(); cb.close(id); };
     x.onpointerdown = (e) => e.stopPropagation();
     tab.append(name, dot, x);
@@ -57,7 +61,12 @@ export function createTabs(cb) {
       tab.classList.toggle('preview', !!d.preview);
       tab.classList.toggle('dirty', isDirty);
       tab.setAttribute('aria-selected', String(d.id === activeId));
-      tab.title = `${d.path || d.name}${d.preview ? '\n미리보기 탭 — 더블클릭하거나 고치면 고정됩니다' : ''}${isDirty ? '\n저장하지 않은 변경 사항이 있습니다' : ''}`;
+      tab.title = `${d.path || d.name}${d.preview ? `\n${tr('editor.tabs.preview')}` : ''}${isDirty ? `\n${tr('editor.unsaved_exist')}` : ''}`;
+      // the static texts of a tab are created once, so they are refreshed here (render runs again on language change)
+      tab.querySelector('.ed-tab-dot').title = tr('editor.unsaved');
+      const close = tab.querySelector('.ed-tab-x');
+      close.title = tr('editor.tabs.close.title');
+      close.setAttribute('aria-label', tr('editor.tabs.close.aria'));
       const name = tab.firstChild;
       if (name.textContent !== d.name) name.textContent = d.name;
       return tab;

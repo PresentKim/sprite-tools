@@ -1,6 +1,7 @@
 // 편집기의 파일 띠: 일괄 처리 목록과 같은 파일들을 썸네일로 보여 주고 클릭하면 엽니다.
 // 목록 자체는 일괄 처리 화면(main.js)이 갖고 있고, 여기서는 읽어서 그리기만 합니다 (hooks 로 받음).
-import { el } from './ui.js';
+import { t as tr } from '../i18n/index.js';
+import { el, localized } from './ui.js';
 
 export const normPath = (p) => (p || '').toLowerCase().split('\\').join('/');
 
@@ -24,7 +25,7 @@ export function createStrip(o) {
   const rail = el('div', 'ed-strip-rail');
   const expand = el('button', 'ed-strip-toggle', '▸');
   expand.type = 'button';
-  expand.title = '파일 띠 펼치기';
+  localized(() => { expand.title = tr('editor.strip.expand'); });
   expand.onclick = () => { o.set('collapsed', false); sync(); expand.blur(); };
   const railCount = el('span', 'ed-strip-railcount', '');
   rail.append(expand, railCount);
@@ -32,29 +33,35 @@ export function createStrip(o) {
   // 펼친 상태
   const full = el('div', 'ed-strip-full');
   const head = el('div', 'ed-strip-head');
-  const title = el('span', 'ed-strip-title ellipsis', '파일');
+  const title = el('span', 'ed-strip-title ellipsis');
   const fold = el('button', 'ed-strip-toggle', '◂');
   fold.type = 'button';
-  fold.title = '파일 띠 접기';
+  localized(() => { fold.title = tr('editor.strip.collapse'); });
   fold.onclick = () => { o.set('collapsed', true); sync(); fold.blur(); };
   head.append(title, fold);
 
   const adds = el('div', 'ed-strip-adds');
-  const addF = el('button', 'btn small', '＋ 파일');
-  const addD = el('button', 'btn small', '＋ 폴더');
+  const addF = el('button', 'btn small');
+  const addD = el('button', 'btn small');
   for (const b of [addF, addD]) b.type = 'button';
-  addF.title = 'PNG 파일을 목록에 추가하고 첫 파일을 엽니다 (일괄 처리 목록과 공유)';
-  addD.title = '폴더의 PNG 를 목록에 추가하고 첫 파일을 엽니다';
+  localized(() => {
+    addF.textContent = tr('editor.strip.add_files');
+    addD.textContent = tr('editor.strip.add_folder');
+    addF.title = tr('editor.strip.add_files.title');
+    addD.title = tr('editor.strip.add_folder.title');
+  });
   addF.onclick = () => { addF.blur(); o.addFiles(); };
   addD.onclick = () => { addD.blur(); o.addFolder(); };
   adds.append(addF, addD);
 
   const filter = el('input', 'filter');
   filter.type = 'text';
-  filter.placeholder = '이름 필터';
   filter.spellcheck = false;
   filter.autocomplete = 'off';
-  filter.title = '일괄 처리 목록의 필터와 같습니다';
+  localized(() => {
+    filter.placeholder = tr('editor.strip.filter');
+    filter.title = tr('editor.strip.filter.title');
+  });
   filter.oninput = () => o.setFilter(filter.value);
   filter.onkeydown = (e) => {
     if (e.key === 'Escape' || e.key === 'Enter') {
@@ -65,22 +72,27 @@ export function createStrip(o) {
   };
 
   const list = el('div', 'ed-strip-list');
-  const empty = el('div', 'ed-strip-empty muted small', '목록이 비어 있습니다. ＋ 버튼을 누르거나 PNG 파일·폴더를 끌어다 놓으세요.');
+  const empty = el('div', 'ed-strip-empty muted small');
 
   const foot = el('div', 'ed-strip-foot');
-  const opt = (key, label, tip) => {
+  // labelKey / tipKey: catalog keys of the label and of its tooltip
+  const opt = (key, labelKey, tipKey) => {
     const l = el('label', 'check small');
     const i = el('input');
     i.type = 'checkbox';
     i.checked = !!o.get(key);
     i.onchange = () => { o.set(key, i.checked); i.blur(); };
-    l.title = tip;
-    l.append(i, ` ${label}`);
+    const text = el('span');
+    localized(() => {
+      l.title = tr(tipKey);
+      text.textContent = tr(labelKey);
+    });
+    l.append(i, ' ', text);
     return l;
   };
   foot.append(
-    opt('autoSave', '넘어갈 때 자동 저장', 'PageDown/PageUp(Alt+←/→)으로 다음·이전 파일로 넘어갈 때 고친 파일을 먼저 저장합니다 (백업 설정을 따름)'),
-    opt('keepZoom', '확대 유지', '다음·이전 파일을 열 때 이전 파일의 확대 배율과 위치를 그대로 씁니다 (끄면 화면에 맞춤)'),
+    opt('autoSave', 'editor.strip.auto_save', 'editor.strip.auto_save.title'),
+    opt('keepZoom', 'editor.strip.keep_zoom', 'editor.strip.keep_zoom.title'),
   );
   full.append(head, adds, filter, list, empty, foot);
   root.append(rail, full);
@@ -101,10 +113,10 @@ export function createStrip(o) {
     const sub = el('div', 'ed-file-sub ellipsis');
     main.append(name, sub);
     const dot = el('span', 'ed-file-dot', '●');
-    dot.title = '저장하지 않은 변경 사항';
+    dot.title = tr('editor.unsaved');
     const rm = el('button', 'ed-file-x', '×');
     rm.type = 'button';
-    rm.title = '목록에서 제거 (열려 있는 문서는 그대로)';
+    rm.title = tr('editor.strip.remove');
     rm.onclick = (e) => { e.stopPropagation(); o.remove(row.dataset.path); };
     row.append(thumb, main, dot, rm);
     row.onclick = () => o.open(row.dataset.path, false);
@@ -125,7 +137,7 @@ export function createStrip(o) {
     const shown = visibleList(all, o.filter());
     const total = all.filter((f) => !f.error).length;
     const text = o.filter().trim() ? `${shown.length} / ${total}` : String(total);
-    title.textContent = total ? `파일 ${text}` : '파일';
+    title.textContent = total ? tr('editor.strip.title_n', { text }) : tr('editor.strip.title');
     railCount.textContent = String(total || '');
     if (document.activeElement !== filter && filter.value !== o.filter()) filter.value = o.filter();
 
@@ -156,7 +168,12 @@ export function createStrip(o) {
     const same = ordered.length === list.children.length && ordered.every((n, i) => list.children[i] === n);
     if (!same) list.replaceChildren(...ordered);
     empty.hidden = shown.length > 0;
-    empty.textContent = all.length && !shown.length ? '이름이 맞는 파일이 없습니다' : '목록이 비어 있습니다. ＋ 버튼을 누르거나 PNG 파일·폴더를 끌어다 놓으세요.';
+    empty.textContent = tr(all.length && !shown.length ? 'editor.strip.no_match' : 'editor.strip.empty');
+    // static texts of existing rows follow the current language
+    for (const r of rows.values()) {
+      r.el.querySelector('.ed-file-dot').title = tr('editor.unsaved');
+      r.el.querySelector('.ed-file-x').title = tr('editor.strip.remove');
+    }
   }
 
   function scrollToCurrent() {

@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="ko">
+<html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -12,17 +12,18 @@
         <span class="brand-mark" aria-hidden="true"></span>
         <span>Sprite Tools</span>
       </div>
-      <div class="seg mode-seg" id="mode-seg" role="tablist" aria-label="작업 모드">
-        <button type="button" data-mode="batch" title="일괄 처리 (Ctrl+1)">일괄 처리</button>
-        <button type="button" data-mode="editor" title="편집기 (Ctrl+2)">편집기<span class="mode-dot" id="mode-dot" hidden>●</span></button>
+      <div class="seg mode-seg" id="mode-seg" role="tablist" data-i18n-aria-label="app.mode.aria">
+        <button type="button" data-mode="batch" data-i18n-title="app.mode.batch.title"><span data-i18n="app.mode.batch"></span></button>
+        <button type="button" data-mode="editor" data-i18n-title="app.mode.editor.title"><span data-i18n="app.mode.editor"></span><span class="mode-dot" id="mode-dot" hidden>●</span></button>
       </div>
       <nav class="tabs" id="tabs" role="tablist"></nav>
       <span class="tabs-spacer" id="tabs-spacer" hidden></span>
-      <button class="icon-btn" id="help-btn" title="단축키 도움말 (F1 또는 ?)" aria-label="단축키 도움말">?</button>
+      <select class="lang-select" id="lang-select" data-i18n-title="app.lang.title" data-i18n-aria-label="app.lang.title"></select>
+      <button class="icon-btn" id="help-btn" data-i18n-title="app.help.title" data-i18n-aria-label="app.help.aria">?</button>
     </header>
 
     <main class="layout">
-      <!-- 옵션 -->
+      <!-- Options -->
       <aside class="panel options">
         <div class="panel-scroll">
           <section class="group">
@@ -32,182 +33,182 @@
 
           <section class="group" id="opts-reduce" data-cmd="reduce">
             <div class="seg" id="reduce-mode">
-              <button type="button" data-mode="threshold">병합 강도</button>
-              <button type="button" data-mode="count">최대 색상 수</button>
+              <button type="button" data-mode="threshold" data-i18n="batch.reduce.threshold"></button>
+              <button type="button" data-mode="count" data-i18n="batch.reduce.count"></button>
             </div>
             <div id="reduce-threshold">
-            <label class="field-label" for="threshold">병합 강도 <span class="value" id="threshold-value"></span></label>
+            <label class="field-label" for="threshold"><span data-i18n="batch.reduce.threshold"></span> <span class="value" id="threshold-value"></span></label>
             <input type="range" id="threshold" min="0.005" max="0.3" step="0.005" />
-            <div class="range-hint"><span>원본 유지</span><span>더 많이 합침</span></div>
+            <div class="range-hint"><span data-i18n="batch.reduce.hint_low"></span><span data-i18n="batch.reduce.hint_high"></span></div>
             </div>
             <div id="reduce-count">
-              <label class="field-label" for="max-colors">최대 색상 수</label>
+              <label class="field-label" for="max-colors" data-i18n="batch.reduce.count"></label>
               <input type="number" id="max-colors" min="1" max="256" step="1" />
-              <p class="muted small">이 수 이하가 되는 가장 약한 병합 강도를 자동으로 찾습니다. 투명 색은 세지 않습니다.</p>
+              <p class="muted small" data-i18n="batch.reduce.count_note"></p>
             </div>
           </section>
 
           <section class="group" id="opts-slice" data-cmd="slice">
-            <label class="field-label" for="frame-size">프레임 크기</label>
-            <input type="text" id="frame-size" placeholder="16 또는 16x24" spellcheck="false" />
+            <label class="field-label" for="frame-size" data-i18n="batch.slice.frame_size"></label>
+            <input type="text" id="frame-size" data-i18n-placeholder="batch.slice.frame_size_placeholder" spellcheck="false" />
             <div class="chips" id="frame-presets"></div>
-            <label class="check"><input type="checkbox" id="keep-empty" /> 투명한 빈 프레임도 저장</label>
+            <label class="check"><input type="checkbox" id="keep-empty" /> <span data-i18n="batch.slice.keep_empty"></span></label>
           </section>
 
           <section class="group" id="opts-downscale" data-cmd="downscale">
-            <label class="field-label" for="scale">축소 배율</label>
+            <label class="field-label" for="scale" data-i18n="batch.downscale.scale"></label>
             <select id="scale"></select>
-            <p class="muted small">자동은 같은 색이 이어지는 길이로 확대 배율을 찾습니다.</p>
+            <p class="muted small" data-i18n="batch.downscale.note"></p>
           </section>
 
           <section class="group" id="opts-upscale" data-cmd="upscale">
-            <label class="field-label" for="upscale-scale">확대 배율</label>
+            <label class="field-label" for="upscale-scale" data-i18n="batch.upscale.scale"></label>
             <select id="upscale-scale"></select>
-            <p class="muted small">보간 없이 픽셀을 그대로 키웁니다(최근접 이웃).</p>
+            <p class="muted small" data-i18n="batch.upscale.note"></p>
           </section>
 
           <section class="group" id="opts-trim" data-cmd="trim">
-            <label class="field-label" for="trim-pad">남길 여백 (px)</label>
+            <label class="field-label" for="trim-pad" data-i18n="batch.trim.pad"></label>
             <input type="number" id="trim-pad" min="0" max="256" step="1" />
-            <p class="muted small">투명하지 않은 픽셀을 감싸는 영역으로 자른 뒤, 사방에 이만큼 투명 여백을 더합니다. 이미 같은 모양이거나 완전히 투명한 이미지는 건너뜁니다.</p>
+            <p class="muted small" data-i18n="batch.trim.note"></p>
           </section>
 
           <section class="group" id="opts-despeckle" data-cmd="despeckle">
-            <label class="field-label" for="despeckle-min">이보다 픽셀 수가 적은 조각을 지움</label>
+            <label class="field-label" for="despeckle-min" data-i18n="batch.despeckle.min"></label>
             <input type="number" id="despeckle-min" min="1" max="100000" step="1" />
-            <label class="check small" title="끄면 상하좌우로 닿은 픽셀만 한 조각으로 봅니다"><input type="checkbox" id="despeckle-diag" /> 대각선도 이어진 것으로 (8방향)</label>
-            <p class="muted small">투명하지 않은 픽셀이 이어진 덩어리를 한 조각으로 봅니다(알파가 조금이라도 있으면 내용). 기준보다 작은 덩어리는 완전 투명으로 지우고, 지울 조각이 없는 이미지는 건너뜁니다. 예: 4 → 1~3픽셀짜리 얼룩 제거.</p>
+            <label class="check small" data-i18n-title="batch.despeckle.diag_title"><input type="checkbox" id="despeckle-diag" /> <span data-i18n="common.diagonal"></span></label>
+            <p class="muted small" data-i18n="batch.despeckle.note"></p>
           </section>
 
           <section class="group" id="opts-extract" data-cmd="extract">
-            <p class="muted small">이미지에 쓰인 색을 팔레트 PNG(색 1개 = 1px, 한 줄)로 뽑습니다. 많이 쓴 색부터, 투명 색은 제외하고 알파는 255로 맞춥니다. 256색을 넘으면 먼저 색상 줄이기가 필요합니다.</p>
-            <label class="field-label" for="save-name">팔레트 목록에 저장 (선택)</label>
-            <input type="text" id="save-name" placeholder="이름 (예: my-palette)" spellcheck="false" />
-            <label class="check small"><input type="checkbox" id="save-force" /> 같은 이름이 있으면 덮어쓰기</label>
-            <p class="muted small" id="save-hint">저장하면 '팔레트 적용'에서 바로 고를 수 있습니다. 파일이 하나일 때만 사용할 수 있습니다.</p>
+            <p class="muted small" data-i18n="batch.extract.note"></p>
+            <label class="field-label" for="save-name" data-i18n="batch.extract.save_name"></label>
+            <input type="text" id="save-name" data-i18n-placeholder="batch.extract.save_name_placeholder" spellcheck="false" />
+            <label class="check small"><input type="checkbox" id="save-force" /> <span data-i18n="batch.extract.force"></span></label>
+            <p class="muted small" id="save-hint" data-i18n="batch.extract.save_hint"></p>
           </section>
 
           <section class="group" id="opts-pack" data-cmd="pack">
-            <label class="field-label" for="pack-cols">열 수</label>
+            <label class="field-label" for="pack-cols" data-i18n="batch.pack.cols"></label>
             <input type="number" id="pack-cols" min="0" max="256" step="1" />
-            <p class="muted small">0 = 자동 (개수의 제곱근을 올림)</p>
-            <label class="field-label" for="pack-gap">칸 사이 간격 (px)</label>
+            <p class="muted small" data-i18n="batch.pack.cols_note"></p>
+            <label class="field-label" for="pack-gap" data-i18n="batch.pack.gap"></label>
             <input type="number" id="pack-gap" min="0" max="64" step="1" />
-            <label class="field-label">작은 이미지 위치</label>
+            <label class="field-label" data-i18n="batch.pack.align"></label>
             <div class="seg" id="pack-align">
-              <button type="button" data-align="topleft">왼쪽 위</button>
-              <button type="button" data-align="center">가운데</button>
+              <button type="button" data-align="topleft" data-i18n="batch.pack.align_topleft"></button>
+              <button type="button" data-align="center" data-i18n="batch.pack.align_center"></button>
             </div>
-            <p class="muted small">목록의 모든 파일을 이름의 숫자 순서(frame-2, frame-10)대로 한 장에 합칩니다. 칸 크기는 가장 큰 이미지 기준입니다.</p>
+            <p class="muted small" data-i18n="batch.pack.note"></p>
           </section>
 
           <section class="group" id="opts-index" data-cmd="index">
-            <p class="muted small">색상 순서는 이미지에 처음 나온 순서이며, 255색을 넘는 이미지는 먼저 색상 줄이기나 팔레트 적용이 필요합니다.</p>
+            <p class="muted small" data-i18n="batch.index.note"></p>
           </section>
 
           <section class="group" id="opts-recolor" data-cmd="recolor">
-            <label class="field-label" for="palette-select">팔레트</label>
+            <label class="field-label" for="palette-select" data-i18n="batch.recolor.palette"></label>
             <select id="palette-select"></select>
             <div class="row">
-              <input type="text" id="palette-name" placeholder="Lospec 이름 (예: pico-8)" spellcheck="false" />
-              <button class="btn" id="palette-fetch">불러오기</button>
+              <input type="text" id="palette-name" data-i18n-placeholder="batch.recolor.name_placeholder" spellcheck="false" />
+              <button class="btn" id="palette-fetch" data-i18n="batch.recolor.fetch"></button>
             </div>
             <div class="row">
-              <button class="btn ghost small" id="palette-file">PNG 파일에서…</button>
-              <button class="btn ghost small" id="palette-browse">Lospec 둘러보기 ↗</button>
+              <button class="btn ghost small" id="palette-file" data-i18n="batch.recolor.file"></button>
+              <button class="btn ghost small" id="palette-browse" data-i18n="batch.recolor.browse"></button>
             </div>
             <div class="swatches" id="palette-swatches"></div>
             <p class="muted small" id="palette-info"></p>
           </section>
 
           <section class="group" id="output-group">
-            <h3>저장 방식</h3>
+            <h3 data-i18n="batch.output.title"></h3>
             <div id="output-file">
-              <label class="radio"><input type="radio" name="out-mode" value="suffix" /> 원본 옆에 새 파일로 저장</label>
-              <label class="radio"><input type="radio" name="out-mode" value="dir" /> 다른 폴더에 저장</label>
+              <label class="radio"><input type="radio" name="out-mode" value="suffix" /> <span data-i18n="batch.output.suffix"></span></label>
+              <label class="radio"><input type="radio" name="out-mode" value="dir" /> <span data-i18n="batch.output.dir"></span></label>
               <div class="indent" id="export-dir-box">
                 <div class="row">
                   <span class="path-display" id="export-dir-label"></span>
-                  <button class="btn ghost small" id="export-dir-pick">변경</button>
+                  <button class="btn ghost small" id="export-dir-pick" data-i18n="batch.output.change"></button>
                 </div>
-                <p class="muted small">폴더에서 찾은 파일은 하위 폴더 구조를 유지합니다.</p>
+                <p class="muted small" data-i18n="batch.output.keep_tree"></p>
               </div>
-              <label class="radio" id="inplace-radio"><input type="radio" name="out-mode" value="inplace" /> 원본 덮어쓰기</label>
+              <label class="radio" id="inplace-radio"><input type="radio" name="out-mode" value="inplace" /> <span data-i18n="batch.output.inplace"></span></label>
               <div class="indent" id="inplace-box">
-                <label class="check small" title="덮어쓰는 파일마다 원본을 같은 폴더의 .sprite-tools-backup 폴더에 복사해 둡니다"><input type="checkbox" id="backup" /> 덮어쓰기 전에 원본 백업</label>
+                <label class="check small" data-i18n-title="batch.output.backup_title"><input type="checkbox" id="backup" /> <span data-i18n="batch.output.backup"></span></label>
                 <p class="warn small" id="inplace-warn"></p>
               </div>
               <div id="suffix-box">
-                <label class="field-label" for="suffix">출력 접미사</label>
+                <label class="field-label" for="suffix" data-i18n="batch.output.suffix_label"></label>
                 <input type="text" id="suffix" spellcheck="false" />
                 <p class="muted small" id="suffix-example"></p>
               </div>
             </div>
             <div id="output-dir">
-              <label class="field-label">프레임 저장 폴더</label>
+              <label class="field-label" data-i18n="batch.output.slice_dir"></label>
               <div class="row">
                 <span class="path-display" id="out-dir-label"></span>
-                <button class="btn ghost small" id="out-dir-pick">변경</button>
-                <button class="btn ghost small" id="out-dir-clear" title="원본과 같은 폴더">초기화</button>
+                <button class="btn ghost small" id="out-dir-pick" data-i18n="batch.output.change"></button>
+                <button class="btn ghost small" id="out-dir-clear" data-i18n="batch.output.reset" data-i18n-title="batch.output.same_folder"></button>
               </div>
-              <p class="muted small">&lt;이름&gt;-0001.png, &lt;이름&gt;-0002.png … 로 저장됩니다.</p>
+              <p class="muted small" data-i18n="batch.output.slice_names"></p>
             </div>
           </section>
 
           <details class="group">
-            <summary>고급</summary>
-            <label class="field-label" for="threads">동시 처리 수</label>
+            <summary data-i18n="batch.advanced"></summary>
+            <label class="field-label" for="threads" data-i18n="batch.threads"></label>
             <input type="number" id="threads" min="0" max="256" />
-            <p class="muted small">0 = CPU 코어 수만큼 (권장)</p>
+            <p class="muted small" data-i18n="batch.threads_note"></p>
           </details>
         </div>
 
         <div class="run-area">
-          <label class="check small" id="only-shown-box" hidden title="끄면 필터와 상관없이 목록의 모든 파일을 처리합니다"><input type="checkbox" id="only-shown" /> <span id="only-shown-label"></span></label>
+          <label class="check small" id="only-shown-box" hidden data-i18n-title="batch.only_shown_title"><input type="checkbox" id="only-shown" /> <span id="only-shown-label"></span></label>
           <button class="btn primary run" id="run-btn"></button>
           <p class="muted small center" id="run-hint">Ctrl+Enter</p>
         </div>
       </aside>
 
-      <!-- 파일 목록 -->
+      <!-- File list -->
       <section class="panel files">
         <div class="toolbar files-toolbar">
           <div class="toolbar-row">
-            <button class="btn" id="add-files">＋ 파일</button>
-            <button class="btn" id="add-folder">＋ 폴더</button>
+            <button class="btn" id="add-files" data-i18n="batch.files.add_files"></button>
+            <button class="btn" id="add-folder" data-i18n="batch.files.add_folder"></button>
             <span class="muted small ellipsis count" id="file-count"></span>
-            <button class="btn ghost small" id="clear-files">비우기</button>
+            <button class="btn ghost small" id="clear-files" data-i18n="batch.files.clear"></button>
           </div>
           <div class="toolbar-row">
-            <input type="text" id="file-filter" class="filter" placeholder="파일 이름 필터 (Ctrl+F)" spellcheck="false" autocomplete="off" />
-            <label class="check small" title="폴더를 추가할 때 하위 폴더까지 포함"><input type="checkbox" id="recursive" /> 하위 폴더 포함</label>
+            <input type="text" id="file-filter" class="filter" data-i18n-placeholder="batch.files.filter_placeholder" spellcheck="false" autocomplete="off" />
+            <label class="check small" data-i18n-title="batch.files.recursive_title"><input type="checkbox" id="recursive" /> <span data-i18n="batch.files.recursive"></span></label>
           </div>
         </div>
         <div class="file-list" id="file-list" tabindex="0"></div>
         <div class="empty" id="empty">
           <div class="empty-art" aria-hidden="true"></div>
-          <p><strong>PNG 파일이나 폴더를 여기에 끌어다 놓으세요</strong></p>
-          <p class="muted">또는 위의 ＋ 파일 / ＋ 폴더 버튼을 사용하세요</p>
+          <p><strong data-i18n="batch.files.empty_title"></strong></p>
+          <p class="muted" data-i18n="batch.files.empty_hint"></p>
         </div>
       </section>
 
-      <!-- 미리보기 -->
+      <!-- Preview -->
       <section class="panel preview">
         <div class="toolbar">
-          <strong class="ellipsis" id="preview-name">미리보기</strong>
+          <strong class="ellipsis" id="preview-name"></strong>
           <span class="spacer"></span>
           <div class="seg" id="zoom-seg"></div>
-          <button class="btn ghost small" id="edit-btn" title="이 파일을 편집기에서 열기 (더블클릭)">편집기에서 열기</button>
-          <button class="btn ghost small" id="reveal-btn" title="탐색기에서 보기">폴더 열기</button>
+          <button class="btn ghost small" id="edit-btn" data-i18n="batch.preview.edit" data-i18n-title="batch.preview.edit_title"></button>
+          <button class="btn ghost small" id="reveal-btn" data-i18n="batch.preview.reveal" data-i18n-title="batch.preview.reveal_title"></button>
         </div>
         <div class="compare">
           <figure class="pane">
-            <figcaption><span>원본</span><span class="cap-right muted"><span class="probe" id="orig-probe" hidden></span><span class="meta" id="orig-meta"></span></span></figcaption>
+            <figcaption><span data-i18n="batch.preview.original"></span><span class="cap-right muted"><span class="probe" id="orig-probe" hidden></span><span class="meta" id="orig-meta"></span></span></figcaption>
             <div class="canvas" id="orig-canvas"><img id="orig-img" alt="" draggable="false" /></div>
           </figure>
           <figure class="pane" id="result-pane">
-            <figcaption><span id="result-title">결과</span><span class="cap-right muted"><span class="probe" id="result-probe" hidden></span><span class="meta" id="result-meta"></span></span></figcaption>
-            <div class="canvas" id="result-canvas" title="누르고 있으면 원본 (Space)">
+            <figcaption><span id="result-title"></span><span class="cap-right muted"><span class="probe" id="result-probe" hidden></span><span class="meta" id="result-meta"></span></span></figcaption>
+            <div class="canvas" id="result-canvas" data-i18n-title="batch.preview.hold_title">
               <img id="result-img" alt="" draggable="false" />
               <img id="compare-img" alt="" draggable="false" hidden />
               <div class="canvas-msg" id="result-msg"></div>
@@ -223,80 +224,80 @@
 
     <footer class="statusbar">
       <div class="progress" id="progress"><div class="bar" id="progress-bar"></div></div>
-      <span id="status-text">준비됨</span>
+      <span id="status-text"></span>
       <span class="spacer"></span>
       <span class="muted" id="status-right"></span>
     </footer>
 
-    <div class="drop-overlay" id="drop-overlay"><div>놓아서 추가</div></div>
+    <div class="drop-overlay" id="drop-overlay"><div data-i18n="app.drop"></div></div>
     <div class="toast" id="toast"></div>
 
     <div class="overlay" id="help" hidden>
       <div class="dialog help" role="dialog" aria-modal="true" aria-labelledby="help-title">
         <div class="dialog-head">
-          <h2 id="help-title">단축키</h2>
-          <button class="icon-btn" id="help-close" aria-label="닫기">×</button>
+          <h2 id="help-title" data-i18n="help.title"></h2>
+          <button class="icon-btn" id="help-close" data-i18n-aria-label="common.close">×</button>
         </div>
-        <h3>공통</h3>
+        <h3 data-i18n="help.section.common"></h3>
         <dl class="keys">
-          <dt><kbd>Ctrl</kbd>+<kbd>1</kbd> <kbd>Ctrl</kbd>+<kbd>2</kbd></dt><dd>일괄 처리 / 편집기 전환</dd>
-          <dt><kbd>F1</kbd> <kbd>?</kbd></dt><dd>이 도움말</dd>
+          <dt><kbd>Ctrl</kbd>+<kbd>1</kbd> <kbd>Ctrl</kbd>+<kbd>2</kbd></dt><dd data-i18n-html="help.common.mode"></dd>
+          <dt><kbd>F1</kbd> <kbd>?</kbd></dt><dd data-i18n-html="help.common.help"></dd>
         </dl>
-        <h3>일괄 처리</h3>
+        <h3 data-i18n="help.section.batch"></h3>
         <dl class="keys">
-          <dt><kbd>Ctrl</kbd>+<kbd>Enter</kbd></dt><dd>실행</dd>
-          <dt><kbd>Esc</kbd></dt><dd>작업 취소 / 닫기 / 필터 지우기</dd>
-          <dt><kbd>Alt</kbd>+<kbd>1</kbd>~<kbd>9</kbd> <kbd>Alt</kbd>+<kbd>0</kbd></dt><dd>명령 전환 (0 = 열 번째)</dd>
-          <dt><kbd>↑</kbd> <kbd>↓</kbd></dt><dd>파일 이동</dd>
-          <dt><kbd>Delete</kbd></dt><dd>목록에서 제거</dd>
-          <dt><kbd>Ctrl</kbd>+<kbd>F</kbd></dt><dd>파일 이름 필터</dd>
-          <dt>더블클릭</dt><dd>파일을 편집기에서 열기 (탐색기에서 보기는 '폴더 열기' 버튼)</dd>
-          <dt><kbd>Space</kbd></dt><dd>누르고 있는 동안 원본 보기 (결과 창을 마우스로 눌러도 됨)</dd>
-          <dt><kbd>Ctrl</kbd>+휠</dt><dd>미리보기 확대/축소</dd>
+          <dt><kbd>Ctrl</kbd>+<kbd>Enter</kbd></dt><dd data-i18n-html="help.batch.run"></dd>
+          <dt><kbd>Esc</kbd></dt><dd data-i18n-html="help.batch.cancel"></dd>
+          <dt><kbd>Alt</kbd>+<kbd>1</kbd>~<kbd>9</kbd> <kbd>Alt</kbd>+<kbd>0</kbd></dt><dd data-i18n-html="help.batch.commands"></dd>
+          <dt><kbd>↑</kbd> <kbd>↓</kbd></dt><dd data-i18n-html="help.batch.move"></dd>
+          <dt><kbd>Delete</kbd></dt><dd data-i18n-html="help.batch.remove"></dd>
+          <dt><kbd>Ctrl</kbd>+<kbd>F</kbd></dt><dd data-i18n-html="help.batch.filter"></dd>
+          <dt data-i18n-html="help.batch.dblclick.keys"></dt><dd data-i18n-html="help.batch.dblclick"></dd>
+          <dt><kbd>Space</kbd></dt><dd data-i18n-html="help.batch.hold"></dd>
+          <dt data-i18n-html="help.batch.wheel.keys"></dt><dd data-i18n-html="help.batch.wheel"></dd>
         </dl>
-        <p class="muted small">미리보기에 마우스를 올리면 픽셀 좌표와 색상이 캡션에 표시됩니다.</p>
-        <h3>편집기 — 도구</h3>
+        <p class="muted small" data-i18n="help.batch.note"></p>
+        <h3 data-i18n="help.section.tools"></h3>
         <dl class="keys">
-          <dt><kbd>B</kbd> <kbd>E</kbd> <kbd>G</kbd> <kbd>I</kbd></dt><dd>연필 · 지우개 · 채우기 · 스포이트</dd>
-          <dt><kbd>L</kbd> <kbd>U</kbd> <kbd>Shift</kbd>+<kbd>U</kbd></dt><dd>선 · 사각형 · 타원</dd>
-          <dt><kbd>W</kbd></dt><dd>마법봉 — 클릭한 곳과 같은 색 영역 선택 (<kbd>Shift</kbd> 더하기 · <kbd>Alt</kbd> 빼기). 옵션: 대각선 포함(8방향) · 전체 같은 색 · 허용 오차(채우기와 공유)</dd>
-          <dt><kbd>Alt</kbd>+클릭</dt><dd>스포이트 (어느 도구에서나)</dd>
-          <dt><kbd>Shift</kbd></dt><dd>선: 0/45/90° 고정 · 사각형/타원: 정사각형/원 (그리는 중에 누름)</dd>
-          <dt><kbd>X</kbd></dt><dd>주 색 ↔ 보조 색 (왼쪽 버튼 = 주 색, 오른쪽 버튼 = 보조 색)</dd>
-          <dt><kbd>[</kbd> <kbd>]</kbd></dt><dd>브러시 크기 줄이기 / 키우기</dd>
-          <dt><kbd>Esc</kbd></dt><dd>그리는 중인 선·도형 취소</dd>
+          <dt><kbd>B</kbd> <kbd>E</kbd> <kbd>G</kbd> <kbd>I</kbd></dt><dd data-i18n-html="help.tools.basic"></dd>
+          <dt><kbd>L</kbd> <kbd>U</kbd> <kbd>Shift</kbd>+<kbd>U</kbd></dt><dd data-i18n-html="help.tools.shapes"></dd>
+          <dt><kbd>W</kbd></dt><dd data-i18n-html="help.tools.wand"></dd>
+          <dt data-i18n-html="help.tools.altclick.keys"></dt><dd data-i18n-html="help.tools.altclick"></dd>
+          <dt><kbd>Shift</kbd></dt><dd data-i18n-html="help.tools.shift"></dd>
+          <dt><kbd>X</kbd></dt><dd data-i18n-html="help.tools.swap"></dd>
+          <dt><kbd>[</kbd> <kbd>]</kbd></dt><dd data-i18n-html="help.tools.size"></dd>
+          <dt><kbd>Esc</kbd></dt><dd data-i18n-html="help.tools.esc"></dd>
         </dl>
-        <h3>편집기 — 선택·이동·클립보드</h3>
+        <h3 data-i18n="help.section.select"></h3>
         <dl class="keys">
-          <dt><kbd>M</kbd> <kbd>V</kbd></dt><dd>사각형 선택 · 이동 도구</dd>
-          <dt>드래그 · <kbd>Shift</kbd>+드래그 · <kbd>Alt</kbd>+드래그</dt><dd>선택 · 선택에 더하기 · 선택에서 빼기 (선택이 있으면 모든 그리기 도구가 선택된 픽셀만 바꿈)</dd>
-          <dt><kbd>Ctrl</kbd>+<kbd>A</kbd> <kbd>Ctrl</kbd>+<kbd>D</kbd> <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>I</kbd></dt><dd>전체 선택 · 선택 해제 · 선택 반전</dd>
-          <dt>선택 안쪽 드래그 · <kbd>←↑↓→</kbd></dt><dd>선택한 픽셀 이동 (방향키 1px, <kbd>Shift</kbd> 10px)</dd>
-          <dt><kbd>Enter</kbd> · 바깥 클릭 · <kbd>Esc</kbd></dt><dd>이동 확정 · 이동 취소 (확정 한 번이 실행 취소 한 단계)</dd>
-          <dt><kbd>Ctrl</kbd>+<kbd>C</kbd> <kbd>Ctrl</kbd>+<kbd>X</kbd> <kbd>Ctrl</kbd>+<kbd>V</kbd></dt><dd>복사 · 잘라내기 · 붙여넣기 (붙여넣으면 떠 있는 선택으로 나타남)</dd>
-          <dt><kbd>Delete</kbd></dt><dd>선택한 픽셀 지우기</dd>
-          <dt><kbd>Shift</kbd>+<kbd>H</kbd> <kbd>Shift</kbd>+<kbd>V</kbd></dt><dd>가로 · 세로 뒤집기 (선택이 없으면 이미지 전체)</dd>
+          <dt><kbd>M</kbd> <kbd>V</kbd></dt><dd data-i18n-html="help.select.tools"></dd>
+          <dt data-i18n-html="help.select.drag.keys"></dt><dd data-i18n-html="help.select.drag"></dd>
+          <dt><kbd>Ctrl</kbd>+<kbd>A</kbd> <kbd>Ctrl</kbd>+<kbd>D</kbd> <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>I</kbd></dt><dd data-i18n-html="help.select.all"></dd>
+          <dt data-i18n-html="help.select.nudge.keys"></dt><dd data-i18n-html="help.select.nudge"></dd>
+          <dt data-i18n-html="help.select.commit.keys"></dt><dd data-i18n-html="help.select.commit"></dd>
+          <dt><kbd>Ctrl</kbd>+<kbd>C</kbd> <kbd>Ctrl</kbd>+<kbd>X</kbd> <kbd>Ctrl</kbd>+<kbd>V</kbd></dt><dd data-i18n-html="help.select.clipboard"></dd>
+          <dt><kbd>Delete</kbd></dt><dd data-i18n-html="help.select.delete"></dd>
+          <dt><kbd>Shift</kbd>+<kbd>H</kbd> <kbd>Shift</kbd>+<kbd>V</kbd></dt><dd data-i18n-html="help.select.flip"></dd>
         </dl>
-        <p class="muted small">회전, 캔버스 크기, 자르기, 여백 자르기는 위쪽 ‘이미지’ 메뉴, 색상 줄이기·팔레트 적용·1:1 축소·확대·작은 조각 지우기는 ‘효과’ 메뉴에 있습니다(조각 지우기는 선택 영역이 있으면 그 안쪽만 지움).</p>
-        <h3>편집기 — 여러 파일 연속 작업</h3>
+        <p class="muted small" data-i18n="help.select.note"></p>
+        <h3 data-i18n="help.section.multi"></h3>
         <dl class="keys">
-          <dt><kbd>PageDown</kbd> <kbd>PageUp</kbd> · <kbd>Alt</kbd>+<kbd>→</kbd> <kbd>Alt</kbd>+<kbd>←</kbd></dt><dd>파일 띠(= 일괄 처리 목록)의 다음 · 이전 파일 열기 (어느 도구에서나, 끝에서는 알림만)</dd>
-          <dt><kbd>Ctrl</kbd>+<kbd>Tab</kbd> <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Tab</kbd></dt><dd>다음 · 이전 탭</dd>
-          <dt><kbd>Ctrl</kbd>+<kbd>W</kbd> · 탭의 × · 가운데 버튼</dt><dd>탭 닫기 (고친 문서는 저장 여부를 물음)</dd>
-          <dt><kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>S</kbd></dt><dd>모두 저장 — 경로가 없는 새 문서는 건너뜀</dd>
-          <dt>탭·파일 더블클릭</dt><dd>미리보기(이탤릭) 탭을 고정. 파일 띠에서 클릭하거나 PageDown 으로 연 파일은 수정하지 않았다면 다음 파일이 같은 탭을 대신하고, 고치면 탭이 고정됩니다</dd>
+          <dt><kbd>PageDown</kbd> <kbd>PageUp</kbd> · <kbd>Alt</kbd>+<kbd>→</kbd> <kbd>Alt</kbd>+<kbd>←</kbd></dt><dd data-i18n-html="help.multi.step"></dd>
+          <dt><kbd>Ctrl</kbd>+<kbd>Tab</kbd> <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Tab</kbd></dt><dd data-i18n-html="help.multi.tabs"></dd>
+          <dt data-i18n-html="help.multi.close.keys"></dt><dd data-i18n-html="help.multi.close"></dd>
+          <dt><kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>S</kbd></dt><dd data-i18n-html="help.multi.save_all"></dd>
+          <dt data-i18n-html="help.multi.pin.keys"></dt><dd data-i18n-html="help.multi.pin"></dd>
         </dl>
-        <p class="muted small">파일 띠 아래의 ‘넘어갈 때 자동 저장’은 PageDown/PageUp 으로 넘어갈 때 고친 파일을 먼저 저장하고(백업 설정 적용), ‘확대 유지’는 다음 파일을 같은 확대 배율로 엽니다. 파일 띠와 일괄 처리 목록은 같은 목록입니다.</p>
-        <h3>편집기 — 보기·파일</h3>
+        <p class="muted small" data-i18n="help.multi.note"></p>
+        <h3 data-i18n="help.section.view"></h3>
         <dl class="keys">
-          <dt><kbd>Ctrl</kbd>+휠 · <kbd>+</kbd> <kbd>-</kbd></dt><dd>확대/축소 (커서 위치 기준)</dd>
-          <dt><kbd>0</kbd> · <kbd>1</kbd></dt><dd>화면에 맞춤 · 100%</dd>
-          <dt><kbd>Space</kbd>+드래그 · 휠클릭 드래그</dt><dd>화면 이동 (휠: 세로, <kbd>Shift</kbd>+휠: 가로)</dd>
-          <dt><kbd>Ctrl</kbd>+<kbd>'</kbd> · <kbd>#</kbd></dt><dd>픽셀 격자 켜기/끄기 (4배 이상)</dd>
-          <dt><kbd>Ctrl</kbd>+<kbd>Z</kbd></dt><dd>실행 취소</dd>
-          <dt><kbd>Ctrl</kbd>+<kbd>Y</kbd> <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd></dt><dd>다시 실행</dd>
-          <dt><kbd>Ctrl</kbd>+<kbd>S</kbd> <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd></dt><dd>저장 · 다른 이름으로 저장</dd>
-          <dt><kbd>Ctrl</kbd>+<kbd>O</kbd> <kbd>Ctrl</kbd>+<kbd>N</kbd></dt><dd>열기 · 새로 만들기 (열린 문서는 그대로, 새 탭으로)</dd>
+          <dt data-i18n-html="help.view.zoom.keys"></dt><dd data-i18n-html="help.view.zoom"></dd>
+          <dt><kbd>0</kbd> · <kbd>1</kbd></dt><dd data-i18n-html="help.view.fit"></dd>
+          <dt data-i18n-html="help.view.pan.keys"></dt><dd data-i18n-html="help.view.pan"></dd>
+          <dt><kbd>Ctrl</kbd>+<kbd>'</kbd> · <kbd>#</kbd></dt><dd data-i18n-html="help.view.grid"></dd>
+          <dt><kbd>Ctrl</kbd>+<kbd>Z</kbd></dt><dd data-i18n-html="help.view.undo"></dd>
+          <dt><kbd>Ctrl</kbd>+<kbd>Y</kbd> <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd></dt><dd data-i18n-html="help.view.redo"></dd>
+          <dt><kbd>Ctrl</kbd>+<kbd>S</kbd> <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd></dt><dd data-i18n-html="help.view.save"></dd>
+          <dt><kbd>Ctrl</kbd>+<kbd>O</kbd> <kbd>Ctrl</kbd>+<kbd>N</kbd></dt><dd data-i18n-html="help.view.open"></dd>
         </dl>
       </div>
     </div>

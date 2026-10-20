@@ -215,12 +215,13 @@
 
 /* 좁은 창(최소 980px)에서도 상단 탭과 미리보기 도구줄이 넘치지 않게 줄입니다 */
 @media (max-width: 1100px) {
-  .topbar { gap: 8px; }
+  .topbar { gap: 4px; padding: 0 8px; }
   .brand > span:last-child { display: none; }
   .mode-seg { margin-left: 0; }
-  .mode-seg button { padding: 4px 8px; }
-  .tab { padding: 0 5px; font-size: 12.5px; }
-  .tab-sep { margin: 0 4px; }
+  .mode-seg button { padding: 4px 7px; }
+  .tab { padding: 0 4px; font-size: 12px; }
+  .tab-sep { margin: 0 3px; }
+  .lang-select { padding: 3px 2px; font-size: 11.5px; }
   .preview .toolbar { gap: 6px; padding-left: 8px; padding-right: 8px; }
   #zoom-seg button { padding: 3px 5px; }
 }

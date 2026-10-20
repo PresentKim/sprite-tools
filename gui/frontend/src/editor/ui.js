@@ -1,5 +1,16 @@
 // 편집기에서 쓰는 작은 UI 도구: 요소 생성, 모달 대화상자.
 
+// Labels of static widgets (built once) register a function with localized(): it runs now and again after every
+// language change (relabel()). Dynamic content (menus, option panels, rows) is simply re-rendered with t().
+const labelFns = [];
+export function localized(fn) {
+  labelFns.push(fn);
+  fn();
+}
+export function relabel() {
+  for (const fn of labelFns) fn();
+}
+
 export const el = (tag, cls, text) => {
   const e = document.createElement(tag);
   if (cls) e.className = cls;

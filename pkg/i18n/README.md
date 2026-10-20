@@ -56,5 +56,5 @@ Texts printed without arguments are used as-is (no `%%` unescaping).
 Some values are padded for column alignment in the console (`cli.run.label.*`) or contain
 aligned example blocks (`cmd.*.details`); keep that layout.
 
-TODO (phase 2): the GUI front end has its own catalog; document how to add a language there
-once it exists.
+The GUI front end has its own catalog under `gui/frontend/src/i18n/locales/`; a language needs both.
+See [docs/TRANSLATING.md](../../docs/TRANSLATING.md) for the complete steps.

@@ -2,29 +2,37 @@ import './style.css';
 import {
   Cancel, DefaultSuffix, Describe, ExpandPaths, ListPalettes, LoadPalette,
   PickFiles, PickFolder, PickPaletteFile, Preview, PreviewPack, RestoreBackups, Reveal, Run, RunPack, SetEditorDirtyCount,
+  SetLanguage,
 } from '../wailsjs/go/main/App';
 import { BrowserOpenURL, EventsOn, OnFileDrop } from '../wailsjs/runtime/runtime';
 import { createEditor } from './editor/editor.js';
+import { DEFAULT_LANGUAGE, applyI18n, getLanguage, languages, onLanguageChange, setLanguage, t, tn } from './i18n/index.js';
 
-// out: 결과를 저장하는 방식 — file(접미사/다른 폴더/덮어쓰기), extract(덮어쓰기 제외), slice(프레임 폴더), pack(저장 시 파일 선택)
-// 순서가 Alt+1..9 단축키 순서이고, group 이 바뀌는 곳에 탭 구분선이 들어갑니다.
+// out: how the result is saved — file (suffix / other folder / overwrite), extract (no overwrite), slice (frame folder), pack (file chosen when saving)
+// The order is the order of the Alt+1..9 shortcuts; a tab separator is inserted wherever group changes.
+// Labels and descriptions live in the catalogs: batch.cmd.<id>.label / batch.cmd.<id>.desc
 const COMMANDS = [
-  { id: 'reduce', group: 0, label: '색상 줄이기', out: 'file', desc: '비슷한 색상을 합쳐 색상 수를 줄입니다. 많이 쓰인 색이 대표 색으로 남습니다.' },
-  { id: 'recolor', group: 0, label: '팔레트 적용', out: 'file', desc: '모든 색을 선택한 팔레트에서 가장 가까운 색으로 바꿉니다.' },
-  { id: 'index', group: 0, label: '인덱스 PNG', out: 'file', desc: '팔레트(인덱스) PNG로 바꾸고 0번 색을 투명(#ffffff00)으로 맞춥니다.' },
-  { id: 'extract', group: 0, label: '팔레트 추출', out: 'extract', desc: '이미지에 쓰인 색을 팔레트 PNG로 뽑습니다. 이름을 주면 팔레트 목록에도 저장됩니다.' },
-  { id: 'downscale', group: 1, label: '1:1 축소', out: 'file', desc: '확대해서 저장된 픽셀 아트를 원래 크기로 되돌립니다.' },
-  { id: 'upscale', group: 1, label: '확대', out: 'file', desc: '정수 배율로 픽셀을 그대로 키웁니다(최근접 이웃).' },
-  { id: 'trim', group: 1, label: '여백 자르기', out: 'file', desc: '투명한 바깥 여백을 잘라냅니다. 필요하면 일정한 여백을 남길 수 있습니다.' },
-  { id: 'despeckle', group: 1, label: '조각 지우기', out: 'file', desc: '떨어져 있는 작은 조각(남은 얼룩)을 찾아 투명하게 지웁니다. 기준 크기보다 픽셀 수가 적은 덩어리가 대상입니다.' },
-  { id: 'slice', group: 2, label: '프레임 자르기', out: 'slice', desc: '스프라이트 시트를 같은 크기의 프레임으로 잘라 각각 저장합니다.' },
-  { id: 'pack', group: 2, label: '시트 합치기', out: 'pack', desc: '목록의 모든 이미지를 한 장의 스프라이트 시트로 합칩니다(프레임 자르기의 반대).' },
+  { id: 'reduce', group: 0, out: 'file' },
+  { id: 'recolor', group: 0, out: 'file' },
+  { id: 'index', group: 0, out: 'file' },
+  { id: 'extract', group: 0, out: 'extract' },
+  { id: 'downscale', group: 1, out: 'file' },
+  { id: 'upscale', group: 1, out: 'file' },
+  { id: 'trim', group: 1, out: 'file' },
+  { id: 'despeckle', group: 1, out: 'file' },
+  { id: 'slice', group: 2, out: 'slice' },
+  { id: 'pack', group: 2, out: 'pack' },
 ];
+const cmdLabel = (c) => t(`batch.cmd.${c.id}.label`);
+const cmdDesc = (c) => t(`batch.cmd.${c.id}.desc`);
 const FRAME_PRESETS = ['8', '16', '24', '32', '48', '64', '16x32'];
 const SCALES = [0, 2, 3, 4, 5, 6, 8, 10, 12, 16];
 const UPSCALES = [2, 3, 4, 5, 6, 8, 10, 12, 16];
-const ZOOMS = [['fit', '맞춤'], [1, '1x'], [2, '2x'], [4, '4x'], [8, '8x'], [16, '16x']];
-const STATUS_LABEL = { done: '완료', skipped: '건너뜀', failed: '실패', running: '처리 중' };
+const ZOOMS = ['fit', 1, 2, 4, 8, 16];
+const zoomLabel = (z) => (z === 'fit' ? t('batch.zoom.fit') : `${z}x`);
+const statusLabel = (s) => t(`batch.file_status.${s}`);
+const scaleLabel = (s) => (s === 0 ? t('common.auto_detect') : t('common.scale_option', { n: s }));
+const paletteLabel = (p) => tn('common.palette_option', p.colors.length, { name: p.name.toLowerCase().endsWith('.png') ? p.name.split(/[\\/]/).pop() : p.name });
 
 const $ = (id) => document.getElementById(id);
 const el = (tag, cls, text) => {
@@ -133,6 +141,20 @@ function request() {
   };
 }
 
+// The status bar text is kept as a description (catalog key + params, or raw text) so that it can be re-rendered
+// when the language changes. n selects the plural form (tn) when given.
+let statusLeft = { key: 'status.ready' };
+let statusRight = null;
+function renderStatus() {
+  const text = (s) => (!s ? '' : s.raw != null ? s.raw : s.n != null ? tn(s.key, s.n, s.params) : t(s.key, s.params));
+  $('status-text').textContent = text(statusLeft);
+  $('status-right').textContent = text(statusRight);
+}
+function setStatus(key, raw, params, n) {
+  statusLeft = key ? { key, params, n } : { raw };
+  renderStatus();
+}
+
 const localUrl = (f) => `/local?path=${encodeURIComponent(f.path)}&v=${f.v || 0}`;
 const fmtBytes = (n) => (n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1048576).toFixed(1)} MB`);
 
@@ -146,20 +168,26 @@ function renderTabs() {
     const b = el('button', 'tab');
     b.setAttribute('role', 'tab');
     b.setAttribute('aria-selected', String(c.id === settings.command));
-    b.title = i < 10 ? `${c.label} (Alt+${(i + 1) % 10})` : c.label;
-    b.append(c.label);
+    b.title = i < 10 ? `${cmdLabel(c)} (Alt+${(i + 1) % 10})` : cmdLabel(c);
+    b.append(cmdLabel(c));
     b.onclick = () => setCommand(c.id);
     tabs.append(b);
   });
 }
 
+// Command tabs, title and description (all translated text of the selected command).
+function renderCommandTexts() {
+  renderTabs();
+  const c = cmdInfo();
+  $('cmd-title').textContent = cmdLabel(c);
+  $('cmd-desc').textContent = cmdDesc(c);
+}
+
 async function setCommand(id) {
   settings.command = id;
   saveSettings();
-  renderTabs();
   const c = COMMANDS.find((x) => x.id === id);
-  $('cmd-title').textContent = c.label;
-  $('cmd-desc').textContent = c.desc;
+  renderCommandTexts();
   document.querySelectorAll('[data-cmd]').forEach((g) => { g.hidden = g.dataset.cmd !== id; });
   $('output-group').hidden = c.out === 'pack';
   $('output-file').hidden = c.out === 'slice' || c.out === 'pack';
@@ -179,18 +207,16 @@ function renderOutput() {
   $('export-dir-box').hidden = mode !== 'dir';
   $('inplace-box').hidden = mode !== 'inplace';
   $('backup').checked = settings.backup;
-  $('inplace-warn').textContent = settings.backup
-    ? '각 파일 옆의 .sprite-tools-backup 폴더에 원본을 복사해 둡니다. 실행 직후 되돌릴 수 있습니다.'
-    : '원본 파일이 바뀝니다. 되돌릴 수 없습니다.';
+  $('inplace-warn').textContent = settings.backup ? t('batch.output.warn_backup') : t('batch.output.warn_nobackup');
   const sfx = settings.suffixes[settings.command] ?? '';
   if (mode === 'dir') {
-    $('suffix-example').textContent = `hero.png → (폴더)/hero${sfx}.png` + (sfx ? '' : ' · 접미사는 비워도 됩니다');
+    $('suffix-example').textContent = sfx ? t('batch.output.example_dir', { suffix: sfx }) : t('batch.output.example_dir_empty');
   } else {
-    $('suffix-example').textContent = sfx ? `hero.png → hero${sfx}.png` : '접미사를 입력하세요';
+    $('suffix-example').textContent = sfx ? t('batch.output.example_suffix', { suffix: sfx }) : t('batch.output.example_missing');
   }
-  $('export-dir-label').textContent = settings.exportDir || '폴더를 선택하세요';
+  $('export-dir-label').textContent = settings.exportDir || t('batch.output.pick_folder');
   $('export-dir-label').title = settings.exportDir;
-  $('out-dir-label').textContent = settings.outDir || '원본과 같은 폴더';
+  $('out-dir-label').textContent = settings.outDir || t('batch.output.same_folder');
   $('out-dir-label').title = settings.outDir;
 }
 
@@ -236,13 +262,9 @@ function initOptions() {
   $('keep-empty').onchange = (e) => { settings.keepEmpty = e.target.checked; saveSettings(); schedulePreview(); };
 
   const sc = $('scale');
-  SCALES.forEach((s) => sc.append(new Option(s === 0 ? '자동 감지' : `${s}배`, s)));
-  sc.value = settings.scale;
-  sc.onchange = () => { settings.scale = Number(sc.value); saveSettings(); schedulePreview(); };
-
   const up = $('upscale-scale');
-  UPSCALES.forEach((s) => up.append(new Option(`${s}배`, s)));
-  up.value = settings.upscale;
+  renderScaleOptions();
+  sc.onchange = () => { settings.scale = Number(sc.value); saveSettings(); schedulePreview(); };
   up.onchange = () => { settings.upscale = Number(up.value); saveSettings(); schedulePreview(); };
 
   const numberSetting = (id, key, max) => {
@@ -282,14 +304,14 @@ function initOptions() {
     r.onchange = () => { if (r.checked) { settings.outMode = r.value; saveSettings(); renderOutput(); } };
   });
   $('export-dir-pick').onclick = async () => {
-    const dir = await PickFolder('저장할 폴더 선택');
+    const dir = await PickFolder(t('dialog.pick_export_dir'));
     if (dir) { settings.exportDir = dir; saveSettings(); renderOutput(); }
   };
   $('backup').onchange = (e) => { settings.backup = e.target.checked; saveSettings(); renderOutput(); };
   $('suffix').oninput = (e) => { settings.suffixes[settings.command] = e.target.value; saveSettings(); renderOutput(); };
 
   $('out-dir-pick').onclick = async () => {
-    const dir = await PickFolder('프레임 저장 폴더 선택');
+    const dir = await PickFolder(t('dialog.pick_frame_dir'));
     if (dir) { settings.outDir = dir; saveSettings(); renderOutput(); }
   };
   $('out-dir-clear').onclick = () => { settings.outDir = ''; saveSettings(); renderOutput(); };
@@ -306,7 +328,7 @@ function initOptions() {
     const name = $('palette-name').value.trim();
     if (!name) return;
     $('palette-fetch').disabled = true;
-    $('palette-info').textContent = '불러오는 중…';
+    $('palette-info').textContent = t('common.loading');
     try {
       const p = await LoadPalette(name);
       $('palette-name').value = '';
@@ -335,20 +357,34 @@ function initOptions() {
   $('palette-browse').onclick = () => BrowserOpenURL('https://lospec.com/palette-list');
 
   // 확대
-  const seg = $('zoom-seg');
-  ZOOMS.forEach(([z, label]) => {
-    const b = el('button', '', label);
-    b.onclick = () => setZoom(z);
-    b.dataset.zoom = z;
-    seg.append(b);
-  });
   renderZoom();
 
   $('reveal-btn').onclick = () => { const f = selectedFile(); if (f) Reveal(f.path); };
   $('edit-btn').onclick = () => { const f = selectedFile(); if (f && !f.error) openInEditor(f.path); };
 }
 
+// The scale <select>s hold translated labels ("Auto-detect", "2x"), so they are rebuilt on language change.
+function renderScaleOptions() {
+  const fill = (select, list, value) => {
+    select.replaceChildren(...list.map((s) => new Option(scaleLabel(s), s)));
+    select.value = value;
+  };
+  fill($('scale'), SCALES, settings.scale);
+  fill($('upscale-scale'), UPSCALES, settings.upscale);
+}
+
 function renderZoom() {
+  const seg = $('zoom-seg');
+  seg.replaceChildren(...ZOOMS.map((z) => {
+    const b = el('button', '', zoomLabel(z));
+    b.onclick = () => setZoom(z);
+    b.dataset.zoom = z;
+    b.classList.toggle('on', String(settings.zoom) === String(z));
+    return b;
+  }));
+}
+
+function setZoomMarks() {
   $('zoom-seg').querySelectorAll('button').forEach((b) => b.classList.toggle('on', String(settings.zoom) === b.dataset.zoom));
 }
 
@@ -376,11 +412,8 @@ async function refreshPalettes(select) {
 function renderPaletteSelect() {
   const s = $('palette-select');
   s.replaceChildren();
-  if (!state.palettes.length) s.append(new Option('저장된 팔레트 없음', ''));
-  state.palettes.forEach((p) => {
-    const label = p.name.toLowerCase().endsWith('.png') ? p.name.split(/[\\/]/).pop() : p.name;
-    s.append(new Option(`${label} (${p.colors.length}색)`, p.name));
-  });
+  if (!state.palettes.length) s.append(new Option(t('common.no_palettes'), ''));
+  state.palettes.forEach((p) => s.append(new Option(paletteLabel(p), p.name)));
   s.value = settings.palette;
 }
 
@@ -398,7 +431,7 @@ function renderSwatches(p) {
   const info = $('palette-info');
   info.className = 'muted small';
   if (!p) {
-    info.textContent = 'Lospec 팔레트 이름을 입력해 불러오세요. 한 번 받은 팔레트는 오프라인에서도 쓸 수 있습니다.';
+    info.textContent = t('batch.recolor.hint');
     return;
   }
   p.colors.forEach((c) => {
@@ -407,7 +440,7 @@ function renderSwatches(p) {
     s.title = c;
     box.append(s);
   });
-  info.textContent = `${p.colors.length}색 · ${p.path}`;
+  info.textContent = tn('batch.recolor.info', p.colors.length, { path: p.path });
 }
 
 // ---------- 파일 목록 ----------
@@ -421,7 +454,7 @@ async function addPaths(paths, opt = {}) {
     const fresh = (entries || []).filter((e) => !known.has(e.path.toLowerCase()));
     state.files.push(...fresh.map((e) => ({ ...e, status: e.error ? 'failed' : '', message: e.error || '', v: Date.now() })));
     if (!fresh.length) {
-      if (!opt.quiet || !(entries && entries.length)) toast(entries && entries.length ? '이미 목록에 있는 파일입니다' : 'PNG 파일을 찾지 못했습니다');
+      if (!opt.quiet || !(entries && entries.length)) toast(entries && entries.length ? t('batch.files.already') : t('toast.no_png'));
     } else if (!state.selected) state.selected = (fresh.find((f) => !f.error) || fresh[0]).path;
     renderFiles();
     schedulePreview();
@@ -494,9 +527,9 @@ function fileRow(f) {
   main.append(sub);
   if (f.message) main.append(el('div', `file-msg ${f.status}`, f.message));
 
-  const badge = f.status ? el('span', `badge ${f.status}`, STATUS_LABEL[f.status]) : el('span');
+  const badge = f.status ? el('span', `badge ${f.status}`, statusLabel(f.status)) : el('span');
   const rm = el('button', 'remove', '×');
-  rm.title = '목록에서 제거 (Delete)';
+  rm.title = t('batch.files.remove');
   rm.onclick = (e) => { e.stopPropagation(); removeFile(f.path); };
 
   row.append(thumb, main, badge, rm);
@@ -510,13 +543,13 @@ function renderFiles() {
   const shown = visibleFiles();
   list.replaceChildren(...shown.map(fileRow));
   if (state.files.length && !shown.length) {
-    list.append(el('div', 'no-match', `'${$('file-filter').value.trim()}' 와 이름이 맞는 파일이 없습니다`));
+    list.append(el('div', 'no-match', t('batch.files.no_match', { filter: $('file-filter').value.trim() })));
   }
   $('empty').hidden = state.files.length > 0;
   $('file-count').textContent = !state.files.length ? ''
-    : state.filter ? `표시 ${shown.length} / 전체 ${state.files.length}` : `${state.files.length}개`;
+    : state.filter ? t('batch.files.count_filtered', { shown: shown.length, total: state.files.length }) : tn('batch.files.count', state.files.length);
   renderRunButton();
-  editor.filesChanged(); // 편집기의 파일 띠도 같은 목록을 보여 줍니다
+  editor?.filesChanged(); // 편집기의 파일 띠도 같은 목록을 보여 줍니다
 }
 
 function setFilter(text) {
@@ -555,17 +588,17 @@ async function runPreview() {
   $('reveal-btn').disabled = !f;
   $('edit-btn').disabled = !f || !!f.error;
   if (!f || (packing && !valid.length)) {
-    $('preview-name').textContent = '미리보기';
+    $('preview-name').textContent = t('batch.preview.title');
     origImg.hidden = resImg.hidden = true;
     state.hasResult = false;
     applyCompare();
     $('orig-meta').textContent = $('result-meta').textContent = '';
-    setMsg(msg, '', '파일을 선택하면 처리 결과를 미리 볼 수 있습니다');
+    setMsg(msg, '', t('batch.preview.empty'));
     $('result-colors').replaceChildren();
     return;
   }
 
-  $('preview-name').textContent = packing ? `시트 미리보기 · ${valid.length}개 합침` : f.name;
+  $('preview-name').textContent = packing ? tn('batch.preview.pack_title', valid.length) : f.name;
   $('preview-name').title = f.path;
   const origSrc = localUrl(f);
   if (origImg.dataset.src !== origSrc) {
@@ -601,7 +634,7 @@ async function runPreview() {
   } else {
     resImg.hidden = true;
     $('result-meta').textContent = '';
-    setMsg(msg, res.status, res.status === 'skipped' ? `건너뜀: ${res.message}` : res.message);
+    setMsg(msg, res.status, res.status === 'skipped' ? t('batch.preview.skipped', { message: res.message }) : res.message);
   }
   renderColors(res.colors);
   layoutImages();
@@ -618,7 +651,7 @@ function renderColors(colors) {
   const box = $('result-colors');
   box.replaceChildren();
   if (!colors || !colors.length) return;
-  box.append(el('span', 'label', `결과 색상 ${colors.length}개 (투명 제외)`));
+  box.append(el('span', 'label', tn('batch.preview.colors', colors.length)));
   colors.forEach((c) => {
     const s = el('span', 'sw');
     s.style.background = c;
@@ -649,7 +682,7 @@ function layoutImages() {
 function setZoom(z) {
   settings.zoom = z;
   saveSettings();
-  renderZoom();
+  setZoomMarks();
   layoutImages();
 }
 
@@ -712,7 +745,7 @@ function applyCompare() {
   const on = (state.cmpMouse || state.cmpKey) && state.hasResult && !$('orig-img').hidden;
   $('compare-img').hidden = !on;
   $('result-img').hidden = on || !state.hasResult;
-  $('result-title').textContent = on ? '결과 · 원본 보는 중' : '결과';
+  $('result-title').textContent = on ? t('batch.preview.result_holding') : t('batch.preview.result');
   $('result-pane').classList.toggle('comparing', !!on);
   layoutImages();
 }
@@ -747,14 +780,14 @@ function wheelZoom(e) {
   e.preventDefault();
   const now = performance.now();
   if (now - wheelAt < 90) return; // 트랙패드가 쏟아내는 이벤트를 한 단계로 묶음
-  const i = ZOOMS.findIndex(([z]) => String(z) === String(settings.zoom));
+  const i = ZOOMS.findIndex((z) => String(z) === String(settings.zoom));
   const j = Math.max(0, Math.min(ZOOMS.length - 1, i + (e.deltaY < 0 ? 1 : -1)));
   if (j === i) return;
   wheelAt = now;
   const pane = e.target.closest('.canvas') || $('orig-canvas');
   const cx = pane.scrollWidth ? (pane.scrollLeft + pane.clientWidth / 2) / pane.scrollWidth : 0.5;
   const cy = pane.scrollHeight ? (pane.scrollTop + pane.clientHeight / 2) / pane.scrollHeight : 0.5;
-  setZoom(ZOOMS[j][0]);
+  setZoom(ZOOMS[j]);
   if (settings.zoom !== 'fit') {
     for (const c of [$('orig-canvas'), $('result-canvas')]) {
       c.scrollLeft = cx * c.scrollWidth - c.clientWidth / 2;
@@ -796,7 +829,7 @@ function initPreviewInteraction() {
 function renderRunButton() {
   const b = $('run-btn');
   if (state.running) {
-    b.textContent = '취소';
+    b.textContent = t('batch.run.cancel');
     b.className = 'btn danger run';
     b.disabled = false;
     $('only-shown-box').hidden = true;
@@ -810,12 +843,13 @@ function renderRunButton() {
   const n = runTargets().length;
   $('only-shown-box').hidden = !filtered;
   $('only-shown').checked = state.onlyShown;
-  $('only-shown-label').textContent = `보이는 ${shown}개만 실행`;
-  const label = cmdInfo().label;
-  b.textContent = n ? `${label} 실행 · ${filtered && !state.onlyShown ? '전체 ' : ''}${n}개` : `${label} 실행`;
+  $('only-shown-label').textContent = tn('batch.only_shown', shown);
+  const label = cmdLabel(cmdInfo());
+  const all = filtered && !state.onlyShown;
+  b.textContent = n ? tn(all ? 'batch.run.button_all' : 'batch.run.button_n', n, { label }) : t('batch.run.button', { label });
   b.className = 'btn primary run';
   b.disabled = n === 0 || !!state.packing;
-  $('run-hint').textContent = filtered && !state.onlyShown ? `필터와 관계없이 전체 ${total}개 처리 · Ctrl+Enter` : 'Ctrl+Enter';
+  $('run-hint').textContent = all ? tn('batch.run.hint_all', total) : 'Ctrl+Enter';
 }
 
 async function startRun() {
@@ -823,7 +857,7 @@ async function startRun() {
   const targets = runTargets();
   if (!targets.length) return;
   if (settings.command === 'recolor' && !settings.palette) {
-    toast('먼저 팔레트를 선택하세요', 'failed');
+    toast(t('toast.pick_palette_first'), 'failed');
     return;
   }
   if (settings.command === 'pack') {
@@ -832,15 +866,15 @@ async function startRun() {
   }
   const mode = effMode();
   if (mode === 'dir' && !settings.exportDir) {
-    toast('저장할 폴더를 먼저 선택하세요', 'failed');
+    toast(t('toast.pick_folder_first'), 'failed');
     return;
   }
   if (mode === 'suffix' && !(settings.suffixes[settings.command] ?? '')) {
-    toast('출력 접미사를 입력하세요', 'failed');
+    toast(t('toast.suffix_required'), 'failed');
     return;
   }
   if (mode === 'inplace' &&
-      !confirm(`원본 ${targets.length}개 파일을 덮어씁니다. ${settings.backup ? '원본은 백업 폴더에 복사해 둡니다.' : '백업하지 않으면 되돌릴 수 없습니다.'} 계속할까요?`)) return;
+      !confirm(tn('batch.run.confirm', targets.length, { note: t(settings.backup ? 'batch.run.confirm_backup' : 'batch.run.confirm_nobackup') }))) return;
 
   targets.forEach((f) => { f.status = 'running'; f.message = ''; });
   renderFiles();
@@ -867,20 +901,20 @@ async function runPack(targets) {
   if (state.packing) return;
   state.packing = true;
   $('run-btn').disabled = true;
-  $('status-text').textContent = '시트 저장 위치를 선택하세요…';
+  setStatus('status.pack_pick');
   try {
     const r = await RunPack(request(), targets.map((f) => f.path));
     if (r.canceled) {
-      $('status-text').textContent = '취소됨';
+      setStatus('status.canceled');
     } else {
-      $('status-text').textContent = r.message;
+      setStatus(null, r.message);
       toast(r.message, '', [
-        { label: '폴더 열기', run: () => Reveal(r.output) },
-        { label: '결과를 목록에 추가', run: () => addPaths([r.output]) },
+        { label: t('toast.action.reveal'), run: () => Reveal(r.output) },
+        { label: t('toast.action.add_result'), run: () => addPaths([r.output]) },
       ]);
     }
   } catch (err) {
-    $('status-text').textContent = '실패';
+    setStatus('status.failed');
     toast(String(err), 'failed');
   } finally {
     state.packing = false;
@@ -891,7 +925,7 @@ async function runPack(targets) {
 function setProgress(done, total) {
   $('progress').classList.toggle('on', state.running);
   $('progress-bar').style.width = total ? `${(done / total) * 100}%` : '0';
-  if (state.running) $('status-text').textContent = `처리 중… ${done}/${total}`;
+  if (state.running) setStatus('status.processing', null, { done, total });
 }
 
 EventsOn('job:result', (r) => {
@@ -908,7 +942,7 @@ EventsOn('job:result', (r) => {
 
 EventsOn('job:done', async (s) => {
   state.running = false;
-  state.files.filter((f) => f.status === 'running').forEach((f) => { f.status = ''; f.message = '취소됨'; });
+  state.files.filter((f) => f.status === 'running').forEach((f) => { f.status = ''; f.message = t('status.canceled'); });
   setProgress(0, 0);
   renderRunButton();
 
@@ -924,27 +958,29 @@ EventsOn('job:done', async (s) => {
   renderFiles();
   schedulePreview();
 
-  const text = `${s.canceled ? '취소됨 · ' : ''}완료 ${s.done} · 건너뜀 ${s.skipped} · 실패 ${s.failed}`;
-  $('status-text').textContent = text;
-  $('status-right').textContent = `${s.seconds.toFixed(1)}초`;
+  const summary = { done: s.done, skipped: s.skipped, failed: s.failed };
+  const text = t(s.canceled ? 'status.summary_canceled' : 'status.summary', summary);
+  setStatus(s.canceled ? 'status.summary_canceled' : 'status.summary', null, summary);
+  statusRight = { key: 'status.seconds', params: { s: s.seconds.toFixed(1) } };
+  renderStatus();
   const actions = [];
   if (mode === 'inplace') {
     if (state.backups.length) {
       const pairs = state.backups.slice();
-      actions.push({ label: '되돌리기', run: () => restoreBackups(pairs) });
-      if (state.backupDirs.length) actions.push({ label: '백업 폴더 열기', run: () => Reveal(state.backupDirs[0]) });
+      actions.push({ label: t('toast.action.undo'), run: () => restoreBackups(pairs) });
+      if (state.backupDirs.length) actions.push({ label: t('toast.action.open_backup'), run: () => Reveal(state.backupDirs[0]) });
     }
   } else {
     if (mode === 'dir' && s.done && run.exportDir) {
-      actions.push({ label: '폴더 열기', run: () => Reveal(run.exportDir) });
+      actions.push({ label: t('toast.action.reveal'), run: () => Reveal(run.exportDir) });
     } else if (mode === 'suffix' && state.lastOutput) {
-      actions.push({ label: '결과 폴더 열기', run: () => Reveal(state.lastOutput) });
+      actions.push({ label: t('toast.action.open_result'), run: () => Reveal(state.lastOutput) });
     } else if (run.cmd === 'slice' && s.done) {
-      actions.push({ label: '폴더 열기', run: () => Reveal(run.outDir || state.lastOutput) });
+      actions.push({ label: t('toast.action.reveal'), run: () => Reveal(run.outDir || state.lastOutput) });
     }
     if (s.outputs && s.outputs.length) {
       const outputs = s.outputs.slice();
-      actions.push({ label: '결과를 목록에 추가', run: () => addPaths(outputs) });
+      actions.push({ label: t('toast.action.add_result'), run: () => addPaths(outputs) });
     }
   }
   toast(text, s.failed ? 'failed' : '', actions);
@@ -970,9 +1006,9 @@ async function restoreBackups(pairs) {
     if (rep.restored === pairs.length) state.backups = []; // 같은 백업을 두 번 되돌리지 않도록 함
     renderFiles();
     schedulePreview();
-    const err = rep.errors && rep.errors.length ? ` · 실패 ${rep.errors.length}: ${rep.errors[0]}` : '';
-    $('status-text').textContent = `원본 ${rep.restored}개를 되돌렸습니다`;
-    toast(`원본 ${rep.restored}개를 되돌렸습니다${err}`, err ? 'failed' : '');
+    const err = rep.errors && rep.errors.length ? ` ${t('status.restore_errors', { n: rep.errors.length, error: rep.errors[0] })}` : '';
+    setStatus('status.restored', null, null, rep.restored);
+    toast(`${tn('status.restored', rep.restored)}${err}`, err ? 'failed' : '');
   } catch (err) {
     toast(String(err), 'failed');
   }
@@ -1003,7 +1039,7 @@ function toggleHelp(open = $('help').hidden) {
 
 function initGlobal() {
   $('add-files').onclick = async () => addPaths(await PickFiles());
-  $('add-folder').onclick = async () => { const d = await PickFolder('이미지 폴더 선택'); if (d) addPaths([d]); };
+  $('add-folder').onclick = async () => { const d = await PickFolder(t('dialog.pick_image_dir')); if (d) addPaths([d]); };
   $('clear-files').onclick = () => { state.files = []; state.selected = null; renderFiles(); schedulePreview(); };
   $('run-btn').onclick = () => (state.running ? Cancel() : startRun());
   $('only-shown').onchange = (e) => { state.onlyShown = e.target.checked; renderRunButton(); schedulePreview(); };
@@ -1015,6 +1051,14 @@ function initGlobal() {
     if (filter.value) { filter.value = ''; setFilter(''); e.stopPropagation(); } // 실행 취소로 번지지 않게 함
     else filter.blur();
   };
+
+  // The command tabs scroll sideways with the wheel when the window is too narrow for all of them (longer translations).
+  $('tabs').addEventListener('wheel', (e) => {
+    const bar = $('tabs');
+    if (bar.scrollWidth <= bar.clientWidth) return;
+    e.preventDefault();
+    bar.scrollLeft += e.deltaX || e.deltaY;
+  }, { passive: false });
 
   $('help-btn').onclick = () => toggleHelp();
   $('help-close').onclick = () => toggleHelp(false);
@@ -1080,48 +1124,59 @@ function initGlobal() {
 
 const normPath = (p) => p.toLowerCase().split('\\').join('/');
 
-const editor = createEditor($('editor'), {
-  toast,
-  isBlocked: () => !$('help').hidden,
-  getBackup: () => settings.backup,
-  setBackup: (on) => { settings.backup = on; saveSettings(); renderOutput(); },
-  // 편집기와 일괄 처리가 같은 파일 목록(state.files)을 씁니다.
-  files: () => state.files,
-  getFilter: () => $('file-filter').value,
-  setFilter: (text) => setFilter(text),
-  addPaths: (paths) => addPaths(paths, { quiet: true }),
-  removeFile: (path) => removeFile(path),
-  // 편집기에서 보고 있는 파일을 일괄 처리 목록의 선택으로도 맞춰 둡니다 (미리보기는 일괄 처리로 돌아갈 때 갱신).
-  onCurrentChange: (path) => {
-    const f = path && state.files.find((x) => normPath(x.path) === normPath(path));
-    if (!f || state.selected === f.path) return;
-    state.selected = f.path;
-    document.querySelectorAll('.file').forEach((r) => r.classList.toggle('selected', r.dataset.path === f.path));
-  },
-  // n: 저장하지 않은 문서 수
-  onDirtyChange: (n) => {
-    const dot = $('mode-dot');
-    dot.hidden = !n;
-    dot.textContent = n > 1 ? `●${n}` : '●';
-    dot.title = n ? `저장하지 않은 문서 ${n}개` : '';
-    SetEditorDirtyCount(n).catch(() => {});
-  },
-  // 저장한 파일이 목록에 있으면 크기·썸네일·미리보기를 새로 읽고, 없으면 목록에 추가할 수 있게 합니다.
-  onSaved: (path) => {
-    const f = state.files.find((x) => normPath(x.path) === normPath(path));
-    const actions = [{ label: '폴더 열기', run: () => Reveal(path) }];
-    if (f) {
-      Describe([path]).then(([e]) => {
-        Object.assign(f, e, { root: f.root, v: Date.now(), status: '', message: '' });
-        renderFiles();
-        if (settings.mode !== 'editor') schedulePreview();
-      });
-    } else {
-      actions.unshift({ label: '목록에 추가', run: () => addPaths([path]) });
-    }
-    return actions;
-  },
-});
+// The editor is created once the Go language has been set (see start()), because it calls Go while it is being built.
+let editor = null;
+let dirtyCount = 0;
+
+function renderDirtyDot() {
+  const dot = $('mode-dot');
+  dot.hidden = !dirtyCount;
+  dot.textContent = dirtyCount > 1 ? `●${dirtyCount}` : '●';
+  dot.title = dirtyCount ? tn('app.unsaved_docs', dirtyCount) : '';
+}
+
+function buildEditor() {
+  editor = createEditor($('editor'), {
+    toast,
+    isBlocked: () => !$('help').hidden,
+    getBackup: () => settings.backup,
+    setBackup: (on) => { settings.backup = on; saveSettings(); renderOutput(); },
+    // 편집기와 일괄 처리가 같은 파일 목록(state.files)을 씁니다.
+    files: () => state.files,
+    getFilter: () => $('file-filter').value,
+    setFilter: (text) => setFilter(text),
+    addPaths: (paths) => addPaths(paths, { quiet: true }),
+    removeFile: (path) => removeFile(path),
+    // 편집기에서 보고 있는 파일을 일괄 처리 목록의 선택으로도 맞춰 둡니다 (미리보기는 일괄 처리로 돌아갈 때 갱신).
+    onCurrentChange: (path) => {
+      const f = path && state.files.find((x) => normPath(x.path) === normPath(path));
+      if (!f || state.selected === f.path) return;
+      state.selected = f.path;
+      document.querySelectorAll('.file').forEach((r) => r.classList.toggle('selected', r.dataset.path === f.path));
+    },
+    // n: 저장하지 않은 문서 수
+    onDirtyChange: (n) => {
+      dirtyCount = n;
+      renderDirtyDot();
+      SetEditorDirtyCount(n).catch(() => {});
+    },
+    // 저장한 파일이 목록에 있으면 크기·썸네일·미리보기를 새로 읽고, 없으면 목록에 추가할 수 있게 합니다.
+    onSaved: (path) => {
+      const f = state.files.find((x) => normPath(x.path) === normPath(path));
+      const actions = [{ label: t('toast.action.reveal'), run: () => Reveal(path) }];
+      if (f) {
+        Describe([path]).then(([e]) => {
+          Object.assign(f, e, { root: f.root, v: Date.now(), status: '', message: '' });
+          renderFiles();
+          if (settings.mode !== 'editor') schedulePreview();
+        });
+      } else {
+        actions.unshift({ label: t('toast.action.add_to_list'), run: () => addPaths([path]) });
+      }
+      return actions;
+    },
+  });
+}
 
 function applyMode() {
   const ed = settings.mode === 'editor';
@@ -1157,9 +1212,61 @@ function initMode() {
 
 // ---------- 시작 ----------
 
-initOptions();
-initGlobal();
-initMode();
-if (import.meta.env.DEV) { window.__addPaths = addPaths; window.__editor = editor; } // 개발 모드(브라우저)에서 드롭 대신 사용
-renderFiles();
-setCommand(COMMANDS.some((c) => c.id === settings.command) ? settings.command : 'reduce');
+// ---------- Language ----------
+// The frontend language (src/i18n) is the source of truth: the selector lists the languages that have a frontend catalog.
+// Go-side messages use the same code when the Go catalog has it; otherwise Go falls back to English.
+
+// Sets the Go language to the current one; falls back to English when Go does not know it.
+async function syncGoLanguage() {
+  try {
+    await SetLanguage(getLanguage());
+  } catch {
+    try { await SetLanguage(DEFAULT_LANGUAGE); } catch { /* keep whatever Go has */ }
+  }
+}
+
+function renderLangSelect() {
+  const sel = $('lang-select');
+  sel.replaceChildren(...languages().map((l) => new Option(l.name, l.code)));
+  sel.value = getLanguage();
+}
+
+// Re-renders every piece of dynamic UI after a language switch, then refreshes whatever Go produced text for.
+let langSeq = 0;
+async function onLanguageChanged() {
+  const seq = ++langSeq;
+  applyI18n(document);
+  renderLangSelect();
+  renderCommandTexts();
+  renderScaleOptions();
+  renderPaletteSelect();
+  renderSwatches(state.palettes.find((p) => p.name === settings.palette));
+  renderZoom();
+  renderOutput();
+  renderFiles();
+  renderStatus();
+  renderDirtyDot();
+  applyCompare();
+  await syncGoLanguage(); // Go must know the new language before it produces more text
+  if (seq !== langSeq) return;
+  editor.relocalize();
+  schedulePreview();
+}
+
+async function start() {
+  applyI18n(document); // frontend texts first, so nothing flashes empty while Go is being told
+  renderLangSelect();
+  await syncGoLanguage(); // must come before every other Go call
+  buildEditor();
+  initOptions();
+  initGlobal();
+  initMode();
+  $('lang-select').onchange = (e) => { setLanguage(e.target.value); e.target.blur(); };
+  onLanguageChange(() => { onLanguageChanged(); });
+  if (import.meta.env.DEV) { window.__addPaths = addPaths; window.__editor = editor; } // 개발 모드(브라우저)에서 드롭 대신 사용
+  renderStatus();
+  renderFiles();
+  setCommand(COMMANDS.some((c) => c.id === settings.command) ? settings.command : 'reduce');
+}
+
+start();

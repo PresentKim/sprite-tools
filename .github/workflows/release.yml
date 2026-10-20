@@ -46,7 +46,7 @@ jobs:
           mkdir "$dir"
           cp sprite-tools.exe "$dir/"
           cp gui/build/bin/sprite-tools-gui.exe "$dir/"
-          cp README.md "$dir/"
+          cp README.md README.ko.md "$dir/"
           powershell -NoProfile -Command "Compress-Archive -Path '$dir/*' -DestinationPath '$dir.zip'"
           echo "ASSET=$dir.zip" >> "$GITHUB_ENV"
 
