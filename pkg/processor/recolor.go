@@ -22,8 +22,8 @@ import (
 
 var paletteNamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 
-// GetPalettesDir: 팔레트를 내려받아 저장하는 공용 폴더(%APPDATA%\sprite-tools\palettes 등)를 반환합니다.
-// CLI 와 GUI 가 같은 폴더를 공유합니다.
+// GetPalettesDir returns the shared folder where palettes are downloaded and stored (%APPDATA%\sprite-tools\palettes, etc.).
+// The CLI and the GUI share the same folder.
 func GetPalettesDir() (string, error) {
 	base, err := os.UserConfigDir()
 	if err != nil {
@@ -32,7 +32,7 @@ func GetPalettesDir() (string, error) {
 	return filepath.Join(base, "sprite-tools", "palettes"), nil
 }
 
-// PaletteDirs: 팔레트를 찾는 폴더 목록입니다. 실행 파일 옆 palettes 폴더(휴대용 구성)가 있으면 먼저 찾습니다.
+// PaletteDirs lists the folders searched for palettes. A palettes folder next to the executable (portable setup), if present, is searched first.
 func PaletteDirs() []string {
 	var dirs []string
 	if exe, err := os.Executable(); err == nil {
@@ -47,7 +47,7 @@ func PaletteDirs() []string {
 	return dirs
 }
 
-// EnsurePalettesDirExists: 공용 팔레트 폴더가 없으면 생성합니다.
+// EnsurePalettesDirExists creates the shared palette folder if it does not exist.
 func EnsurePalettesDirExists() (string, error) {
 	dir, err := GetPalettesDir()
 	if err != nil {
@@ -59,8 +59,8 @@ func EnsurePalettesDirExists() (string, error) {
 	return dir, nil
 }
 
-// ResolvePalette: 팔레트 지정값을 PNG 파일 경로로 바꿉니다.
-// 존재하는 .png 파일 경로면 그대로 사용하고, 아니면 Lospec 팔레트 이름으로 보고 캐시 또는 다운로드합니다.
+// ResolvePalette turns a palette specifier into a PNG file path.
+// An existing .png file path is used as is; otherwise it is treated as a Lospec palette name and taken from the cache or downloaded.
 func ResolvePalette(spec string) (string, error) {
 	spec = strings.TrimSpace(spec)
 	if strings.EqualFold(filepath.Ext(spec), ".png") {
@@ -72,7 +72,7 @@ func ResolvePalette(spec string) (string, error) {
 	return DownloadPalette(spec)
 }
 
-// DownloadPalette: 캐시에 없으면 Lospec에서 팔레트 1x PNG 이미지를 내려받아 공용 팔레트 폴더에 저장합니다.
+// DownloadPalette downloads the palette's 1x PNG from Lospec and saves it to the shared palette folder, unless it is already cached.
 func DownloadPalette(name string) (string, error) {
 	cleanName := strings.ToLower(strings.TrimSpace(name))
 	if !paletteNamePattern.MatchString(cleanName) {
@@ -123,7 +123,7 @@ func DownloadPalette(name string) (string, error) {
 	return savePath, nil
 }
 
-// ListLocalPalettes: 저장된 팔레트 이름 목록을 반환합니다 (중복 제거, 이름순).
+// ListLocalPalettes returns the names of the saved palettes (deduplicated, sorted by name).
 func ListLocalPalettes() ([]string, error) {
 	seen := make(map[string]bool)
 	var palettes []string
@@ -150,7 +150,7 @@ func ListLocalPalettes() ([]string, error) {
 	return palettes, nil
 }
 
-// LoadPaletteColors: 팔레트 PNG 파일에서 고유 색상 목록 및 OKLab 데이터 목록을 추출합니다.
+// LoadPaletteColors extracts the list of unique colors and the OKLab data list from a palette PNG file.
 func LoadPaletteColors(palettePath string) ([]color.NRGBA, []common.OKLab, error) {
 	img, err := common.LoadPNG(palettePath)
 	if err != nil {
@@ -180,15 +180,15 @@ func LoadPaletteColors(palettePath string) ([]color.NRGBA, []common.OKLab, error
 	return rawColors, oklabColors, nil
 }
 
-// Recolor: 파일 단위 RecolorImage.
+// Recolor is the file-level RecolorImage.
 func Recolor(inputPath, outputPath string, paletteColors []color.NRGBA, paletteOKLabs []common.OKLab) (string, error) {
 	return convertFile(inputPath, outputPath, func(src image.Image) (image.Image, string, error) {
 		return RecolorImage(src, paletteColors, paletteOKLabs)
 	})
 }
 
-// RecolorImage: 입력 이미지의 색상을 OKLab 거리 기준 가장 가까운 팔레트 색상으로 변환합니다.
-// 원본 픽셀의 알파 값은 그대로 유지합니다.
+// RecolorImage converts the image's colors to the nearest palette color by OKLab distance.
+// The alpha of the original pixels is kept as is.
 func RecolorImage(src image.Image, paletteColors []color.NRGBA, paletteOKLabs []common.OKLab) (image.Image, string, error) {
 	bounds := src.Bounds()
 	n := common.ToNRGBA(src)

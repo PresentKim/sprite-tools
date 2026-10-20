@@ -7,7 +7,7 @@ import (
 	"sprite-tools/pkg/i18n"
 )
 
-// 기존 테스트는 한국어 문구를 확인하므로 한국어로 실행합니다. 영어/전환은 TestLanguageMethods 에서 확인합니다.
+// The existing tests check Korean wording, so they run in Korean. English and switching are covered in TestLanguageMethods.
 func TestMain(m *testing.M) {
 	if err := i18n.SetLanguage("ko"); err != nil {
 		panic(err)

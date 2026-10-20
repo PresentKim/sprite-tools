@@ -9,8 +9,8 @@ import (
 	"sprite-tools/pkg/i18n"
 )
 
-// 이 패키지의 기존 테스트는 한국어 메시지(골든 해시 포함)를 기대하므로 한국어로 실행합니다.
-// 한국어 카탈로그가 예전 문구를 그대로 재현하는지 확인하는 역할도 합니다. 영어는 TestEnglishMessages 에서 확인합니다.
+// The existing tests in this package expect Korean messages (including the golden hashes), so they run in Korean.
+// This also verifies that the Korean catalog reproduces the old wording exactly. English is covered in TestEnglishMessages.
 func TestMain(m *testing.M) {
 	if err := i18n.SetLanguage("ko"); err != nil {
 		panic(err)

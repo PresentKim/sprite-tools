@@ -7,14 +7,14 @@ import (
 	"sprite-tools/pkg/i18n"
 )
 
-// Trim: 파일 단위 TrimImage.
+// Trim is the file-level TrimImage.
 func Trim(inputPath, outputPath string, pad int) (string, error) {
 	return convertFile(inputPath, outputPath, func(src image.Image) (image.Image, string, error) {
 		return TrimImage(src, pad)
 	})
 }
 
-// opaqueBounds: 알파가 0이 아닌 픽셀을 모두 감싸는 최소 사각형을 반환합니다 (n 의 좌표계, 없으면 ok=false).
+// opaqueBounds returns the minimal rectangle enclosing all pixels with non-zero alpha (in n's coordinates; ok=false if there are none).
 func opaqueBounds(n *image.NRGBA) (r image.Rectangle, ok bool) {
 	w, h := n.Rect.Dx(), n.Rect.Dy()
 	minX, minY, maxX, maxY := w, h, -1, -1
@@ -35,8 +35,8 @@ func opaqueBounds(n *image.NRGBA) (r image.Rectangle, ok bool) {
 	return image.Rect(minX, minY, maxX+1, maxY+1), true
 }
 
-// TrimImage: 투명하지 않은 픽셀의 경계 상자로 자른 뒤 사방에 pad 픽셀의 투명 여백을 붙입니다.
-// 결과가 원본과 같으면, 또는 완전히 투명한 이미지면 Skip 에러를 반환합니다.
+// TrimImage crops to the bounding box of non-transparent pixels and then adds pad pixels of transparent margin on every side.
+// If the result equals the original, or the image is fully transparent, it returns a Skip error.
 func TrimImage(src image.Image, pad int) (image.Image, string, error) {
 	if pad < 0 {
 		return nil, "", i18n.Errorf("err.trim.pad", pad)
@@ -51,7 +51,7 @@ func TrimImage(src image.Image, pad int) (image.Image, string, error) {
 	if newW*newH > maxOutputPixels {
 		return nil, "", i18n.Errorf("err.result_too_large", newW, newH)
 	}
-	// 경계 상자에 여백을 더한 영역이 이미지 전체와 같으면 달라지는 것이 없습니다.
+	// If the bounding box plus padding equals the whole image, nothing changes.
 	if box.Min.X-pad == 0 && box.Min.Y-pad == 0 && newW == w && newH == h {
 		return nil, "", common.Skip("skip.trim.unchanged", pad, w, h)
 	}

@@ -14,10 +14,10 @@ import (
 	"sprite-tools/pkg/i18n"
 )
 
-// 이 파일은 성능 개선(리팩터링) 전후로 결과가 바이트 단위로 같은지 확인하는 회귀 테스트입니다.
-// 기대값은 리팩터링 이전 구현으로 기록한 SHA-256 입니다.
+// This file is a regression test that checks results stay byte-for-byte identical before and after performance work (refactoring).
+// The expected values are SHA-256 hashes recorded with the pre-refactoring implementation.
 
-// lcg: 테스트용 결정적 난수 생성기입니다.
+// lcg is a deterministic random number generator for tests.
 type lcg uint32
 
 func (l *lcg) next() uint32 {
@@ -25,7 +25,7 @@ func (l *lcg) next() uint32 {
 	return uint32(*l >> 8)
 }
 
-// goldenPalette: 비슷한 색(±1~3 차이)이 섞인 기본 색상 목록입니다.
+// goldenPalette is the default color list, mixing similar colors (differing by 1-3).
 func goldenPalette() []color.NRGBA {
 	base := []color.NRGBA{
 		{200, 30, 30, 255}, {30, 200, 30, 255}, {30, 30, 200, 255}, {240, 240, 60, 255},
@@ -37,7 +37,7 @@ func goldenPalette() []color.NRGBA {
 		out = append(out, color.NRGBA{c.R + 2, c.G + 1, c.B, 255})
 		out = append(out, color.NRGBA{c.R, c.G + 3, c.B - 2, 255})
 		if i%2 == 0 {
-			out = append(out, color.NRGBA{c.R, c.G, c.B, 128}) // 반투명
+			out = append(out, color.NRGBA{c.R, c.G, c.B, 128}) // translucent
 		}
 	}
 	return out
@@ -49,17 +49,17 @@ func goldenNRGBA(w, h int) *image.NRGBA {
 	r := lcg(12345)
 	for y := 0; y < h; y++ {
 		for x := 0; x < w; x++ {
-			// 16x16 블록 중 일부는 완전히 비워 빈 프레임을 만듭니다.
+			// Some of the 16x16 blocks are cleared entirely to make empty frames.
 			if (x/16+y/16)%3 == 1 {
 				continue
 			}
 			v := r.next()
 			switch v % 7 {
 			case 0:
-				// 투명이지만 RGB 가 0 이 아닌 픽셀
+				// Transparent pixels whose RGB is not 0
 				img.SetNRGBA(x, y, color.NRGBA{9, 8, 7, 0})
 			case 1:
-				// 완전 투명(0,0,0,0) 은 그대로 둡니다.
+				// Fully transparent (0,0,0,0) is left as is.
 			default:
 				img.SetNRGBA(x, y, pal[int(v>>3)%len(pal)])
 			}
@@ -134,7 +134,7 @@ func goldenPaletteColors() ([]color.NRGBA, []common.OKLab) {
 	return cols, labs
 }
 
-// hashImage: 결과 이미지의 경계와 NRGBA 픽셀(팔레트 이미지면 인덱스와 팔레트도)을 해시합니다.
+// hashImage hashes the result image's bounds and NRGBA pixels (plus the index and palette for a paletted image).
 func hashImage(img image.Image) string {
 	h := sha256.New()
 	b := img.Bounds()
@@ -199,8 +199,8 @@ func goldenResults() map[string]string {
 	return got
 }
 
-// TestGolden: 픽셀 해시와 메시지가 함께 기록된 기대값을 한국어로 비교합니다.
-// 기대값은 i18n 도입 이전에 기록한 그대로이며, 한국어 카탈로그가 예전 문구를 정확히 재현해야 통과합니다.
+// TestGolden compares, in Korean, the expected values recorded with both the pixel hash and the message.
+// The expected values are exactly as recorded before i18n was introduced; the test passes only if the Korean catalog reproduces the old wording exactly.
 func TestGolden(t *testing.T) {
 	if err := i18n.SetLanguage("ko"); err != nil {
 		t.Fatal(err)
@@ -209,14 +209,14 @@ func TestGolden(t *testing.T) {
 	for k, v := range got {
 		want, ok := goldenWant[k]
 		if !ok {
-			t.Errorf("기대값 없음: %q: %q,", k, v)
+			t.Errorf("no expected value: %q: %q,", k, v)
 		} else if want != v {
-			t.Errorf("%s 불일치\n got: %s\nwant: %s", k, v, want)
+			t.Errorf("%s mismatch\n got: %s\nwant: %s", k, v, want)
 		}
 	}
 	for k := range goldenWant {
 		if _, ok := got[k]; !ok {
-			t.Errorf("결과 없음: %s", k)
+			t.Errorf("no result: %s", k)
 		}
 	}
 }

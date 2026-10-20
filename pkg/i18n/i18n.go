@@ -18,7 +18,7 @@ import (
 // DefaultLanguage is used until SetLanguage is called. The OS locale is deliberately not consulted.
 const DefaultLanguage = "en"
 
-// MetaName is the reserved catalog key that holds a language's own name (e.g. "한국어").
+// MetaName is the reserved catalog key that holds a language's own name (e.g. "Français").
 const MetaName = "_meta.name"
 
 //go:embed locales/*.json

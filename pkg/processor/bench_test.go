@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-// benchImage: 1024x1024, 4배 확대된 240색 이미지입니다(일부 픽셀은 반투명/투명).
+// benchImage is a 1024x1024 image of 240 colors scaled up 4x (some pixels are translucent/transparent).
 func benchImage() *image.NRGBA {
 	const size, scale = 1024, 4
 	r := lcg(2024)
@@ -21,7 +21,7 @@ func benchImage() *image.NRGBA {
 	cells := size / scale
 	grid := make([]int, cells*cells)
 	for i := range grid {
-		grid[i] = int(r.next() % 250) // 240 이상은 투명
+		grid[i] = int(r.next() % 250) // 240 and above are transparent
 	}
 	img := image.NewNRGBA(image.Rect(0, 0, size, size))
 	for y := 0; y < size; y++ {

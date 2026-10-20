@@ -121,7 +121,7 @@ func runPack(args []string) int {
 		printError(err)
 		return exitUsage
 	}
-	// 폴더를 훑다가 이전에 만든 시트(출력 파일)가 잡히면 입력에서 뺍니다. 직접 지정한 파일이면 아래 검사에서 거부됩니다.
+	// While walking a folder, drop previously generated sheets (output files) from the input. Explicitly given files are rejected by the check below.
 	var files []string
 	for _, in := range inputs {
 		if in.Root != "" && common.SamePath(in.Path, *out) {

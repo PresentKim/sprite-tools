@@ -1,4 +1,4 @@
-// 캔버스 그리기. 문서는 오프스크린 캔버스(doc.off)에 1:1 로 들어 있고, 여기서 보이는 캔버스로 정수 배율 확대해 그립니다.
+// Canvas drawing. The document sits 1:1 in an offscreen canvas (doc.off), and is drawn from there to the visible canvas at an integer zoom.
 
 const cssVar = (name, fallback) => getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
 
@@ -21,7 +21,7 @@ function checkPattern(ctx, cell) {
   return ctx.createPattern(checkCanvas, 'repeat');
 }
 
-// view: {zoom, ox, oy} — ox,oy 는 뷰포트 안에서 문서 왼쪽 위의 CSS 픽셀 위치
+// view: {zoom, ox, oy} - ox,oy are the CSS pixel position of the document's top-left inside the viewport
 export function drawMain(ctx, cw, ch, dpr, doc, view, o) {
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.clearRect(0, 0, cw, ch);
@@ -32,7 +32,7 @@ export function drawMain(ctx, cw, ch, dpr, doc, view, o) {
   const x0 = Math.max(0, dx), y0 = Math.max(0, dy), x1 = Math.min(cw, dx + dw), y1 = Math.min(ch, dy + dh);
   if (x1 <= x0 || y1 <= y0) return;
 
-  // 투명 배경 체크무늬
+  // Transparent background checkerboard
   ctx.save();
   ctx.beginPath();
   ctx.rect(x0, y0, x1 - x0, y1 - y0);
@@ -42,14 +42,14 @@ export function drawMain(ctx, cw, ch, dpr, doc, view, o) {
   ctx.fillRect(x0 - dx, y0 - dy, x1 - x0, y1 - y0);
   ctx.restore();
 
-  // 이미지 (보이는 부분만)
+  // Image (visible part only)
   const sx0 = Math.max(0, Math.floor((x0 - dx) / z)), sy0 = Math.max(0, Math.floor((y0 - dy) / z));
   const sx1 = Math.min(doc.w, Math.ceil((x1 - dx) / z)), sy1 = Math.min(doc.h, Math.ceil((y1 - dy) / z));
   ctx.imageSmoothingEnabled = false;
   const px = (i) => Math.round(i * z);
   ctx.drawImage(doc.off, sx0, sy0, sx1 - sx0, sy1 - sy0, dx + px(sx0), dy + px(sy0), px(sx1) - px(sx0), px(sy1) - px(sy0));
 
-  // 떠 있는 층 (이동·붙여넣기 중인 픽셀). 문서 밖으로 나간 부분은 보이지 않게 잘라서 그립니다.
+  // Floating layer (pixels being moved or pasted). The part that left the document is clipped so it is not visible.
   const fl = o.float;
   if (fl) {
     ctx.save();
@@ -60,13 +60,13 @@ export function drawMain(ctx, cw, ch, dpr, doc, view, o) {
     ctx.restore();
   }
 
-  // 픽셀 격자
+  // Pixel grid
   if (o.grid && view.zoom >= 4) {
     ctx.fillStyle = 'rgba(128,128,128,0.38)';
     for (let i = sx0; i <= sx1; i++) { const x = dx + px(i); if (x >= x0 && x < x1) ctx.fillRect(x, y0, 1, y1 - y0); }
     for (let j = sy0; j <= sy1; j++) { const y = dy + px(j); if (y >= y0 && y < y1) ctx.fillRect(x0, y, x1 - x0, 1); }
   }
-  // 타일 격자
+  // Tile grid
   const t = o.tile;
   if (t > 0 && view.zoom * t >= 6) {
     ctx.fillStyle = cssVar('--accent', '#6aa7ff');
@@ -76,13 +76,13 @@ export function drawMain(ctx, cw, ch, dpr, doc, view, o) {
     for (let j = Math.ceil(sy0 / t) * t; j <= sy1; j += t) { const y = dy + px(j); if (y >= y0 - 1 && y < y1) ctx.fillRect(x0, y, x1 - x0, lw); }
     ctx.globalAlpha = 1;
   }
-  // 테두리
+  // Border
   ctx.strokeStyle = 'rgba(128,128,128,0.7)';
   ctx.lineWidth = 1;
   ctx.strokeRect(dx - 0.5, dy - 0.5, dw + 1, dh + 1);
 }
 
-// 커서 위치의 브러시 발자국 윤곽. cells: [x,y,x,y,...] (문서 좌표)
+// Outline of the brush footprint at the cursor position. cells: [x,y,x,y,...] (document coordinates)
 export function clearOverlay(ctx, cw, ch) {
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.clearRect(0, 0, cw, ch);
@@ -114,7 +114,7 @@ export function drawCursor(ctx, cw, ch, dpr, view, cells) {
   ctx.stroke();
 }
 
-// 선택 영역의 개미 행렬 윤곽선. edges: [x0,y0,x1,y1,...] (선택 상자 기준), (ox,oy): 상자의 문서 좌표
+// Marching-ants outline of the selection. edges: [x0,y0,x1,y1,...] (relative to the selection box), (ox,oy): the box's document coordinates
 export function drawAnts(ctx, dpr, view, edges, ox, oy, phase) {
   if (!edges.length) return;
   ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -139,7 +139,7 @@ export function drawAnts(ctx, dpr, view, edges, ox, oy, phase) {
   ctx.setLineDash([]);
 }
 
-// 작은 내비게이터: 가능하면 1:1, 크면 칸에 맞춰 줄이고 현재 보이는 영역을 사각형으로 표시합니다.
+// Small navigator: 1:1 if possible, otherwise scaled to fit the cell, with the currently visible area shown as a rectangle.
 export function drawNavigator(canvas, maxW, maxH, dpr, doc, view, vw, vh) {
   if (!doc) { canvas.width = canvas.height = 0; return null; }
   const s = Math.min(1, maxW / doc.w, maxH / doc.h);

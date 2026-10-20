@@ -11,7 +11,7 @@ import (
 	"sprite-tools/pkg/common"
 )
 
-// solid: 한 가지 색으로 채운 w x h NRGBA 이미지를 만듭니다.
+// solid creates a w x h NRGBA image filled with a single color.
 func solid(w, h int, c color.NRGBA) *image.NRGBA {
 	img := image.NewNRGBA(image.Rect(0, 0, w, h))
 	for y := 0; y < h; y++ {
@@ -34,7 +34,7 @@ func TestUpscaleImage(t *testing.T) {
 	}
 	n := out.(*image.NRGBA)
 	if n.Rect.Dx() != 6 || n.Rect.Dy() != 6 {
-		t.Fatalf("크기 %v", n.Rect)
+		t.Fatalf("size %v", n.Rect)
 	}
 	for y := 0; y < 6; y++ {
 		for x := 0; x < 6; x++ {
@@ -46,17 +46,17 @@ func TestUpscaleImage(t *testing.T) {
 	if !strings.Contains(msg, "3배 확대") || !strings.Contains(msg, "2x2 → 6x6") {
 		t.Errorf("msg = %q", msg)
 	}
-	// 확대 후 감지 배율로 축소하면 원본과 같아야 합니다.
+	// Scaling back down by the detected factor after upscaling must equal the original.
 	back, _, err := DownscaleImage(out, 3)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !equalNRGBA(back.(*image.NRGBA), src) {
-		t.Error("확대 → 축소 결과가 원본과 다름")
+		t.Error("upscale -> downscale result differs from the original")
 	}
 	for _, bad := range []int{0, 1, 33, -2} {
 		if _, _, err := UpscaleImage(src, bad); err == nil {
-			t.Errorf("배율 %d 는 에러여야 합니다", bad)
+			t.Errorf("scale %d should be an error", bad)
 		}
 	}
 }
@@ -69,7 +69,7 @@ func TestTrimImage(t *testing.T) {
 	red := color.NRGBA{255, 0, 0, 255}
 	src := image.NewNRGBA(image.Rect(0, 0, 10, 8))
 	src.SetNRGBA(3, 2, red)
-	src.SetNRGBA(5, 4, color.NRGBA{0, 0, 255, 1}) // 알파 1도 내용으로 취급
+	src.SetNRGBA(5, 4, color.NRGBA{0, 0, 255, 1}) // alpha 1 also counts as content
 
 	out, msg, err := TrimImage(src, 0)
 	if err != nil {
@@ -77,10 +77,10 @@ func TestTrimImage(t *testing.T) {
 	}
 	n := out.(*image.NRGBA)
 	if n.Rect.Dx() != 3 || n.Rect.Dy() != 3 {
-		t.Fatalf("크기 %v", n.Rect)
+		t.Fatalf("size %v", n.Rect)
 	}
 	if n.NRGBAAt(0, 0) != red || n.NRGBAAt(2, 2).A != 1 {
-		t.Error("내용이 올바르게 복사되지 않음")
+		t.Error("content was not copied correctly")
 	}
 	if !strings.Contains(msg, "10x8 → 3x3 (여백 0)") {
 		t.Errorf("msg = %q", msg)
@@ -92,37 +92,37 @@ func TestTrimImage(t *testing.T) {
 	}
 	n = out.(*image.NRGBA)
 	if n.Rect.Dx() != 7 || n.Rect.Dy() != 7 || n.NRGBAAt(2, 2) != red || n.NRGBAAt(0, 0).A != 0 {
-		t.Errorf("여백 적용 결과가 올바르지 않음: %v", n.Rect)
+		t.Errorf("padding result is wrong: %v", n.Rect)
 	}
 
-	// 이미 꽉 찬 이미지는 건너뜀
+	// An already full image is skipped
 	if _, _, err := TrimImage(solid(4, 4, red), 0); !common.IsSkip(err) {
-		t.Errorf("꽉 찬 이미지: %v", err)
+		t.Errorf("full image: %v", err)
 	}
-	// 여백이 이미 pad 와 같으면 건너뜀
+	// Skipped if the padding already equals pad
 	padded := image.NewNRGBA(image.Rect(0, 0, 5, 5))
 	padded.SetNRGBA(2, 2, red)
 	if _, _, err := TrimImage(padded, 2); !common.IsSkip(err) {
-		t.Errorf("이미 여백이 맞는 이미지: %v", err)
+		t.Errorf("image that already has the padding: %v", err)
 	}
-	// 완전 투명
+	// Fully transparent
 	if _, _, err := TrimImage(image.NewNRGBA(image.Rect(0, 0, 4, 4)), 1); !common.IsSkip(err) {
-		t.Errorf("투명 이미지: %v", err)
+		t.Errorf("transparent image: %v", err)
 	}
 	if _, _, err := TrimImage(src, -1); err == nil {
-		t.Error("음수 여백은 에러여야 합니다")
+		t.Error("negative padding should be an error")
 	}
 }
 
 func TestExtractPaletteImage(t *testing.T) {
 	a, b, c := color.NRGBA{10, 20, 30, 255}, color.NRGBA{200, 0, 0, 255}, color.NRGBA{0, 200, 0, 255}
 	src := image.NewNRGBA(image.Rect(0, 0, 4, 2))
-	// 등장 순서 c, a, b, a ... 빈도: a=3, b=2, c=2 (b 가 c 보다 늦게 등장)
+	// Order of appearance c, a, b, a ... frequency: a=3, b=2, c=2 (b appears later than c)
 	seq := []color.NRGBA{c, a, b, a, a, b, c, {255, 255, 255, 0}}
 	for i, col := range seq {
 		src.SetNRGBA(i%4, i/4, col)
 	}
-	// a 와 RGB 가 같은 반투명 픽셀은 a 로 합쳐져야 합니다.
+	// A translucent pixel with the same RGB as a must be merged into a.
 	src.SetNRGBA(3, 1, color.NRGBA{10, 20, 30, 100})
 
 	out, msg, err := ExtractPaletteImage(src)
@@ -131,12 +131,12 @@ func TestExtractPaletteImage(t *testing.T) {
 	}
 	n := out.(*image.NRGBA)
 	if n.Rect.Dx() != 3 || n.Rect.Dy() != 1 {
-		t.Fatalf("크기 %v", n.Rect)
+		t.Fatalf("size %v", n.Rect)
 	}
-	want := []color.NRGBA{a, c, b} // a=4, c=2(먼저 등장), b=2
+	want := []color.NRGBA{a, c, b} // a=4, c=2 (appears first), b=2
 	for i, w := range want {
 		if got := n.NRGBAAt(i, 0); got != w {
-			t.Errorf("색 %d = %v, want %v", i, got, w)
+			t.Errorf("color %d = %v, want %v", i, got, w)
 		}
 	}
 	if !strings.Contains(msg, "3개") {
@@ -144,7 +144,7 @@ func TestExtractPaletteImage(t *testing.T) {
 	}
 
 	if _, _, err := ExtractPaletteImage(image.NewNRGBA(image.Rect(0, 0, 3, 3))); !common.IsSkip(err) {
-		t.Errorf("투명 이미지: %v", err)
+		t.Errorf("transparent image: %v", err)
 	}
 
 	many := image.NewNRGBA(image.Rect(0, 0, 300, 1))
@@ -153,7 +153,7 @@ func TestExtractPaletteImage(t *testing.T) {
 	}
 	_, _, err = ExtractPaletteImage(many)
 	if err == nil || common.IsSkip(err) || !strings.Contains(err.Error(), "reduce") {
-		t.Errorf("256색 초과: %v", err)
+		t.Errorf("more than 256 colors: %v", err)
 	}
 }
 
@@ -163,7 +163,7 @@ func TestNormalizePaletteName(t *testing.T) {
 	}
 	for _, bad := range []string{"", "-x", "a b", "a_b", "../x", "한글"} {
 		if _, err := NormalizePaletteName(bad); err == nil {
-			t.Errorf("%q 는 에러여야 합니다", bad)
+			t.Errorf("%q should be an error", bad)
 		}
 	}
 }
@@ -176,43 +176,43 @@ func TestPackImages(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// 3장 → 2열 2행, 칸 4x4
+	// 3 frames -> 2 columns x 2 rows, 4x4 cells
 	if sheet.Rect.Dx() != 8 || sheet.Rect.Dy() != 8 {
-		t.Fatalf("크기 %v", sheet.Rect)
+		t.Fatalf("size %v", sheet.Rect)
 	}
 	if !strings.Contains(msg, "3프레임 → 2x2 시트, 8x8") {
 		t.Errorf("msg = %q", msg)
 	}
 	if sheet.NRGBAAt(3, 3) != r || sheet.NRGBAAt(4, 0) != g || sheet.NRGBAAt(6, 0).A != 0 || sheet.NRGBAAt(4, 3).A != 0 {
-		t.Error("왼쪽 위 정렬 배치가 올바르지 않음")
+		t.Error("top-left aligned placement is wrong")
 	}
 	if sheet.NRGBAAt(0, 4) != b || sheet.NRGBAAt(0, 6).A != 0 {
-		t.Error("두 번째 줄 배치가 올바르지 않음")
+		t.Error("second row placement is wrong")
 	}
 
-	// 간격과 가운데 정렬
+	// Gap and center alignment
 	sheet, _, err = PackSheet(imgs, 3, 2, true)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if sheet.Rect.Dx() != 4*3+2*2 || sheet.Rect.Dy() != 4 {
-		t.Fatalf("크기 %v", sheet.Rect)
+		t.Fatalf("size %v", sheet.Rect)
 	}
-	// 두 번째 칸 x 시작 = 6, g(2x3)는 (7,0)~(8,2)
+	// Second cell starts at x = 6; g (2x3) spans (7,0)-(8,2)
 	if sheet.NRGBAAt(7, 0) != g || sheet.NRGBAAt(7, 2) != g || sheet.NRGBAAt(7, 3).A != 0 || sheet.NRGBAAt(6, 0).A != 0 {
-		t.Error("가운데 정렬 배치가 올바르지 않음")
+		t.Error("center-aligned placement is wrong")
 	}
 	if sheet.NRGBAAt(4, 0).A != 0 {
-		t.Error("간격은 투명이어야 합니다")
+		t.Error("the gap should be transparent")
 	}
 
 	if _, _, err := PackImages(nil, 0, 0); err == nil {
-		t.Error("빈 목록은 에러여야 합니다")
+		t.Error("an empty list should be an error")
 	}
-	// 열 수가 개수보다 크면 개수로 제한
+	// A column count larger than the frame count is capped to it
 	sheet, _, _ = PackImages(imgs, 10, 0)
 	if sheet.Rect.Dx() != 12 || sheet.Rect.Dy() != 4 {
-		t.Errorf("크기 %v", sheet.Rect)
+		t.Errorf("size %v", sheet.Rect)
 	}
 }
 
@@ -226,7 +226,7 @@ func writeTestPNG(t *testing.T, path string, img image.Image) {
 	}
 }
 
-// pack → slice 왕복: 같은 크기의 프레임을 합쳤다가 다시 자르면 원본 프레임이 나와야 합니다.
+// pack -> slice round trip: packing frames of equal size and slicing them again must give back the original frames.
 func TestPackSliceRoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	var frames []*image.NRGBA
@@ -236,29 +236,29 @@ func TestPackSliceRoundTrip(t *testing.T) {
 		f.SetNRGBA(i%6, i%5, color.NRGBA{1, 2, 3, 77})
 		frames = append(frames, f)
 		p := filepath.Join(dir, "in", "frame-"+string(rune('0'+i))+".png")
-		if i >= 5 { // 자연 정렬 확인용으로 두 자리 이름 섞기
+		if i >= 5 { // mix in two-digit names to exercise natural sort
 			p = filepath.Join(dir, "in", "frame-1"+string(rune('0'+i))+".png")
 		}
 		writeTestPNG(t, p, f)
 		paths = append(paths, p)
 	}
-	// 입력 순서를 섞어서 넘겨도 자연 정렬되어야 합니다 (frame-1..4, frame-15..17).
+	// Natural sort must apply even if the inputs are passed in shuffled order (frame-1..4, frame-15..17).
 	shuffled := []string{paths[6], paths[2], paths[0], paths[5], paths[1], paths[4], paths[3]}
 
 	sheetPath := filepath.Join(dir, "sheet.png")
 	if _, err := PackFiles(shuffled, sheetPath, 4, 0, false, false); err != nil {
 		t.Fatal(err)
 	}
-	// 이미 있는 출력은 force 없이 거부
+	// An existing output is rejected without force
 	if _, err := PackFiles(shuffled, sheetPath, 4, 0, false, false); err == nil {
-		t.Error("기존 파일 덮어쓰기는 force 없이 거부되어야 합니다")
+		t.Error("overwriting an existing file should be rejected without force")
 	}
 	if _, err := PackFiles(shuffled, sheetPath, 4, 0, false, true); err != nil {
-		t.Errorf("force 로는 덮어써야 합니다: %v", err)
+		t.Errorf("force should overwrite: %v", err)
 	}
-	// 입력 파일은 force 여도 덮어쓸 수 없음
+	// An input file cannot be overwritten even with force
 	if _, err := PackFiles(shuffled, paths[0], 4, 0, false, true); err == nil {
-		t.Error("입력 파일 덮어쓰기는 항상 거부되어야 합니다")
+		t.Error("overwriting an input file should always be rejected")
 	}
 
 	src, err := common.LoadPNG(sheetPath)
@@ -269,18 +269,18 @@ func TestPackSliceRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 8 { // 2행 x 4열, 마지막 칸은 빈 프레임
-		t.Fatalf("프레임 %d개", len(got))
+	if len(got) != 8 { // 2 rows x 4 columns, the last cell is an empty frame
+		t.Fatalf("%d frames", len(got))
 	}
 	for i, want := range frames {
 		if !equalNRGBA(got[i].Image, want) {
-			t.Errorf("프레임 %d 가 원본과 다름", i+1)
+			t.Errorf("frame %d differs from the original", i+1)
 		}
 	}
 }
 
 func TestSavePaletteRefusesExisting(t *testing.T) {
-	t.Setenv("APPDATA", t.TempDir()) // Windows 의 UserConfigDir
+	t.Setenv("APPDATA", t.TempDir()) // UserConfigDir on Windows
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("HOME", t.TempDir())
 	pal := solid(2, 1, color.NRGBA{1, 2, 3, 255})
@@ -292,17 +292,17 @@ func TestSavePaletteRefusesExisting(t *testing.T) {
 		t.Errorf("path = %s", path)
 	}
 	if _, err := SavePalette("test-pal", pal, false); err == nil {
-		t.Error("같은 이름은 force 없이 거부되어야 합니다")
+		t.Error("the same name should be rejected without force")
 	}
 	if _, err := SavePalette("test-pal", pal, true); err != nil {
 		t.Errorf("force: %v", err)
 	}
 	if _, err := SavePalette("bad name", pal, true); err == nil {
-		t.Error("잘못된 이름은 거부되어야 합니다")
+		t.Error("an invalid name should be rejected")
 	}
 	raw, lab, err := LoadPaletteColors(path)
 	if err != nil || len(raw) != 1 || len(lab) != 1 {
-		t.Errorf("저장한 팔레트를 읽을 수 있어야 합니다: %v %v", raw, err)
+		t.Errorf("the saved palette should be readable: %v %v", raw, err)
 	}
 }
 
@@ -310,65 +310,65 @@ func TestDespeckleImage(t *testing.T) {
 	red := color.NRGBA{255, 0, 0, 255}
 	blue := color.NRGBA{0, 0, 255, 128}
 	src := image.NewNRGBA(image.Rect(0, 0, 10, 8))
-	// 큰 덩어리: 3x3 (9픽셀)
+	// Large blob: 3x3 (9 pixels)
 	for y := 1; y <= 3; y++ {
 		for x := 1; x <= 3; x++ {
 			src.SetNRGBA(x, y, red)
 		}
 	}
-	src.SetNRGBA(8, 1, blue)                    // 외톨이 1픽셀
-	src.SetNRGBA(7, 5, blue)                    // 대각선으로만 이어진 2픽셀
+	src.SetNRGBA(8, 1, blue)                    // isolated single pixel
+	src.SetNRGBA(7, 5, blue)                    // two pixels connected only diagonally
 	src.SetNRGBA(8, 6, blue)                    //
-	src.SetNRGBA(0, 7, color.NRGBA{9, 9, 9, 1}) // 알파 1 도 내용
+	src.SetNRGBA(0, 7, color.NRGBA{9, 9, 9, 1}) // alpha 1 also counts as content
 
-	// 8방향: 대각선 2픽셀은 한 덩어리(크기 2), 외톨이 2개(1픽셀) → 최소 2 면 외톨이 2개 제거
+	// 8-way: the two diagonal pixels form one blob (size 2), plus 2 isolated pixels (size 1) -> with min size 2, the 2 isolated ones are removed
 	out, msg, err := DespeckleImage(src, 2, true)
 	if err != nil {
 		t.Fatal(err)
 	}
 	n := out.(*image.NRGBA)
 	if n.NRGBAAt(8, 1).A != 0 || n.NRGBAAt(0, 7) != (color.NRGBA{}) {
-		t.Error("외톨이가 지워지지 않음")
+		t.Error("isolated pixels were not removed")
 	}
 	if n.NRGBAAt(7, 5) != blue || n.NRGBAAt(8, 6) != blue || n.NRGBAAt(2, 2) != red {
-		t.Error("남겨야 할 픽셀이 바뀜")
+		t.Error("pixels that should stay were changed")
 	}
 	if msg != "조각 2개 제거 (픽셀 2개)" {
 		t.Errorf("msg = %q", msg)
 	}
 	if src.NRGBAAt(8, 1) != blue {
-		t.Error("입력 이미지가 바뀜")
+		t.Error("the input image was changed")
 	}
 
-	// 4방향: 대각선 2픽셀도 각각 1픽셀 조각이 되어 지워짐 (4개)
+	// 4-way: the two diagonal pixels each become a 1-pixel piece and are removed (4 pieces)
 	out, msg, err = DespeckleImage(src, 2, false)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if n = out.(*image.NRGBA); n.NRGBAAt(7, 5).A != 0 || n.NRGBAAt(8, 6).A != 0 || msg != "조각 4개 제거 (픽셀 4개)" {
-		t.Errorf("4방향 결과가 다름: %q", msg)
+		t.Errorf("4-way result differs: %q", msg)
 	}
 
-	// 최소 크기 10: 3x3(9)도 지워져 모두 사라짐
+	// Min size 10: even the 3x3 (9) is removed, so everything disappears
 	out, msg, err = DespeckleImage(src, 10, true)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if n = out.(*image.NRGBA); n.NRGBAAt(2, 2).A != 0 || msg != "조각 4개 제거 (픽셀 13개)" {
-		t.Errorf("최소 10: %q", msg)
+		t.Errorf("min 10: %q", msg)
 	}
 
-	// 지울 것이 없으면 Skip, 잘못된 값은 오류
+	// Skip when there is nothing to remove, error for invalid values
 	if _, _, err := DespeckleImage(src, 1, true); !common.IsSkip(err) {
 		t.Errorf("minSize 1: %v", err)
 	}
 	if _, _, err := DespeckleImage(solid(4, 4, red), 4, true); !common.IsSkip(err) {
-		t.Errorf("조각 없음: %v", err)
+		t.Errorf("no pieces: %v", err)
 	}
 	if _, _, err := DespeckleImage(image.NewNRGBA(image.Rect(0, 0, 4, 4)), 3, true); !common.IsSkip(err) {
-		t.Errorf("완전 투명: %v", err)
+		t.Errorf("fully transparent: %v", err)
 	}
 	if _, _, err := DespeckleImage(src, 0, true); err == nil || common.IsSkip(err) {
-		t.Errorf("minSize 0 는 오류여야 함: %v", err)
+		t.Errorf("minSize 0 should be an error: %v", err)
 	}
 }

@@ -1,11 +1,11 @@
-// 그리기 알고리즘 (DOM 과 무관한 순수 함수). 좌표는 모두 정수 픽셀입니다.
+// Drawing algorithms (pure functions, independent of the DOM). All coordinates are integer pixels.
 import { diff, norm } from './color.js';
 
-// ---------- 브러시 ----------
+// ---------- Brush ----------
 
 const fpCache = new Map();
 
-// 브러시 발자국: [dx0, dy0, dx1, dy1, ...] (중심 픽셀 기준 상대 좌표). size×size 에서 중심은 (size>>1).
+// Brush footprint: [dx0, dy0, dx1, dy1, ...] (coordinates relative to the center pixel). For size×size the center is (size>>1).
 export function footprint(size, shape) {
   const key = `${size}|${shape}`;
   let fp = fpCache.get(key);
@@ -25,9 +25,9 @@ export function footprint(size, shape) {
   return fp;
 }
 
-// ---------- 선 ----------
+// ---------- Line ----------
 
-// Bresenham. 끝점을 포함한 [x0,y0,x1,y1,...] 를 반환합니다.
+// Bresenham. Returns [x0,y0,x1,y1,...] including the end points.
 export function linePoints(x0, y0, x1, y1) {
   const out = [];
   const dx = Math.abs(x1 - x0), sx = x0 < x1 ? 1 : -1;
@@ -45,7 +45,7 @@ export function linePoints(x0, y0, x1, y1) {
 
 const DIRS = [[1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0], [-1, -1], [0, -1], [1, -1]];
 
-// 끝점을 시작점 기준 0/45/90... 도 방향으로 맞춥니다.
+// Snap the end point to a 0/45/90... degree direction from the start point.
 export function snapLine(x0, y0, x1, y1) {
   const dx = x1 - x0, dy = y1 - y0;
   if (!dx && !dy) return [x1, y1];
@@ -55,16 +55,16 @@ export function snapLine(x0, y0, x1, y1) {
   return [x0 + ux * n, y0 + uy * n];
 }
 
-// Shift: 사각형·타원을 정사각형/원으로 (드래그한 긴 쪽에 맞춤)
+// Shift: make rectangles and ellipses squares/circles (fit to the longer dragged side)
 export function squareEnd(x0, y0, x1, y1) {
   const d = Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0));
   return [x0 + (x1 < x0 ? -d : d), y0 + (y1 < y0 ? -d : d)];
 }
 
-// ---------- 픽셀 퍼펙트 ----------
+// ---------- Pixel perfect ----------
 
-// 경로 끝에 점 하나를 더하면서 L 자 모서리를 만드는 가운데 점을 지웁니다. 점을 지웠으면 true.
-// path 는 [x,y,x,y,...] 플랫 배열입니다.
+// Add one point to the end of the path while removing the middle point that forms an L-shaped corner. true if a point was removed.
+// path is a flat array [x,y,x,y,...].
 export function pushPixelPerfect(path, x, y) {
   const n = path.length;
   if (n >= 2 && path[n - 2] === x && path[n - 1] === y) return false;
@@ -79,9 +79,9 @@ export function pushPixelPerfect(path, x, y) {
   return false;
 }
 
-// ---------- 도형 ----------
+// ---------- Shapes ----------
 
-// 사각형 테두리의 중심선 좌표 (emit(x,y))
+// Centerline coordinates of a rectangle outline (emit(x,y))
 export function rectOutline(x0, y0, x1, y1, emit) {
   const l = Math.min(x0, x1), r = Math.max(x0, x1), t = Math.min(y0, y1), b = Math.max(y0, y1);
   for (let x = l; x <= r; x++) { emit(x, t); if (b !== t) emit(x, b); }
@@ -93,7 +93,7 @@ export function rectFill(x0, y0, x1, y1, emit) {
   for (let y = t; y <= b; y++) for (let x = l; x <= r; x++) emit(x, y);
 }
 
-// 경계 상자에 꼭 맞는 타원의 행별 [왼쪽, 오른쪽] 범위
+// Per-row [left, right] ranges of the ellipse that exactly fits the bounding box
 function ellipseRows(x0, y0, x1, y1) {
   const l = Math.min(x0, x1), r = Math.max(x0, x1), t = Math.min(y0, y1), b = Math.max(y0, y1);
   const w = r - l + 1, h = b - t + 1;
@@ -115,7 +115,7 @@ export function ellipseFill(x0, y0, x1, y1, emit) {
   rows.forEach(([a, b], i) => { for (let x = a; x <= b; x++) emit(x, t + i); });
 }
 
-// 안쪽 픽셀 중 상하좌우에 바깥이 있는 픽셀 = 얇은 테두리
+// Inner pixels with an outside neighbor up/down/left/right = thin outline
 export function ellipseOutline(x0, y0, x1, y1, emit) {
   const { rows, t } = ellipseRows(x0, y0, x1, y1);
   rows.forEach(([L, R], i) => {
@@ -123,7 +123,7 @@ export function ellipseOutline(x0, y0, x1, y1, emit) {
     const lu = up ? up[0] : Infinity, ld = dn ? dn[0] : Infinity;
     const ru = up ? up[1] : -Infinity, rd = dn ? dn[1] : -Infinity;
     const a = Math.min(R, Math.max(L, Math.max(lu, ld) - 1));
-    const b = Math.max(L, Math.min(R, Math.min(ru, rd) + 1)); // 가장 바깥 픽셀 R 은 항상 테두리
+    const b = Math.max(L, Math.min(R, Math.min(ru, rd) + 1)); // the outermost pixel R is always part of the outline
     const y = t + i;
     if (b <= a + 1) {
       for (let x = L; x <= R; x++) emit(x, y);
@@ -134,9 +134,9 @@ export function ellipseOutline(x0, y0, x1, y1, emit) {
   });
 }
 
-// ---------- 채우기 ----------
+// ---------- Fill ----------
 
-// 시작 픽셀과 같은(허용 오차 이내) 이어진 영역의 픽셀 번호들. 이어짐은 기본 상하좌우 4방향이고, diag 면 대각선까지 8방향입니다.
+// Pixel indices of the connected region equal to the start pixel (within tolerance). Connectivity is 4-way (up/down/left/right) by default, and 8-way including diagonals if diag is set.
 export function floodContiguous(px32, w, h, sx, sy, tol, diag = false) {
   const seed = norm(px32[sy * w + sx]);
   const match = tol > 0 ? (c) => diff(c, seed) <= tol : (c) => norm(c) === seed;
@@ -164,7 +164,7 @@ export function floodContiguous(px32, w, h, sx, sy, tol, diag = false) {
   return out;
 }
 
-// 이미지 전체에서 시작 픽셀과 같은 색인 픽셀 번호들
+// Pixel indices of all pixels in the whole image with the same color as the start pixel
 export function floodGlobal(px32, sx, sy, w, tol) {
   const seed = norm(px32[sy * w + sx]);
   const match = tol > 0 ? (c) => diff(c, seed) <= tol : (c) => norm(c) === seed;
@@ -173,9 +173,9 @@ export function floodGlobal(px32, sx, sy, w, tol) {
   return out;
 }
 
-// ---------- 변형 ----------
+// ---------- Transform ----------
 
-// 배열(w×h, 어떤 타입이든)을 뒤집거나 돌립니다. kind: flipH | flipV | cw | ccw | r180. 반환: { arr, w, h }
+// Flip or rotate an array (w×h, any type). kind: flipH | flipV | cw | ccw | r180. Returns: { arr, w, h }
 export function transformPix(src, w, h, kind) {
   const rot = kind === 'cw' || kind === 'ccw';
   const nw = rot ? h : w, nh = rot ? w : h;
@@ -196,7 +196,7 @@ export function transformPix(src, w, h, kind) {
   return { arr: dst, w: nw, h: nh };
 }
 
-// 알파가 0 이 아닌 픽셀의 경계 상자 { x0, y0, x1, y1 } (끝 칸 포함). 없으면 null
+// Bounding box { x0, y0, x1, y1 } of pixels with non-zero alpha (end cells inclusive). null if none
 export function opaqueBounds(px32, w, h) {
   let x0 = w, y0 = h, x1 = -1, y1 = -1;
   for (let y = 0; y < h; y++) {
@@ -211,7 +211,7 @@ export function opaqueBounds(px32, w, h) {
   return x1 < 0 ? null : { x0, y0, x1, y1 };
 }
 
-// src(sw×sh)의 (sx,sy)부터 nw×nh 만큼을 새 배열로 복사합니다. 범위 밖은 0 (투명)
+// Copy nw×nh starting at (sx,sy) of src (sw×sh) into a new array. Outside the range is 0 (transparent)
 export function cropPix(src, sw, sh, sx, sy, nw, nh) {
   const dst = new Uint32Array(nw * nh);
   for (let y = 0; y < nh; y++) {

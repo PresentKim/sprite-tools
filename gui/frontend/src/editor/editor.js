@@ -1,7 +1,7 @@
-// 픽셀 편집기: 상태, 화면 구성, 입력 처리, 파일 열기/저장.
-// 문서는 RGBA 픽셀 버퍼 하나(doc.pix, 비곱셈)이고 doc.px32 는 같은 메모리를 uint32 로 본 것입니다.
-// 그리기는 모두 "획(stroke)" 단위로 버퍼를 직접 고치면서 바뀐 픽셀의 이전 값을 기록하고,
-// 획이 끝나면 History 에 패치 하나로 넣습니다. 선·도형은 드래그하는 동안 되돌렸다 다시 그리며 미리 보여줍니다.
+// Pixel editor: state, UI construction, input handling, opening/saving files.
+// A document is a single RGBA pixel buffer (doc.pix, non-premultiplied), and doc.px32 views the same memory as uint32.
+// All drawing edits the buffer directly per "stroke" while recording the previous values of changed pixels,
+// and when the stroke ends it goes into History as one patch. Lines and shapes are undone and redrawn while dragging to preview them.
 import './editor.css';
 import {
   ListPalettes, LoadImageRGBA, LoadPalette, PaletteExists, PickFiles, PickFolder, PickPaletteFile, ProcessPixels, SaveImageAs,
@@ -22,7 +22,7 @@ const TILES = [0, 8, 16, 32, 64];
 const MAX_SIDE = 8192;
 const MAX_PIXELS = 4096 * 4096;
 const PREF_KEY = 'sprite-tools-editor';
-const HISTORY_BUDGET = 256 * 1024 * 1024; // 열려 있는 모든 문서의 실행 취소 기록이 나눠 쓰는 메모리 (문서마다 최대 200단계)
+const HISTORY_BUDGET = 256 * 1024 * 1024; // memory shared by the undo histories of all open documents (up to 200 steps per document)
 
 const ICONS = {
   pencil: '<path d="M3 13l.8-3.2L11 2.6 13.4 5 6.2 12.2z"/><path d="M9.6 4l2.4 2.4"/>',
@@ -69,8 +69,8 @@ const defaultPrefs = {
   shapeFilled: false, symX: false, symY: false, grid: false, tile: 0,
   primary: pack(0, 0, 0, 255), secondary: pack(255, 255, 255, 255), recent: [],
   adhoc: [], palSource: 'adhoc',
-  wandMode: 'contiguous', wand8: false, // 마법봉: 이어진 영역 / 전체 같은 색, 대각선 포함 여부
-  autoSave: false, keepZoom: false, stripCollapsed: false, // 파일 띠 옵션
+  wandMode: 'contiguous', wand8: false, // magic wand: contiguous region / same color everywhere, whether to include diagonals
+  autoSave: false, keepZoom: false, stripCollapsed: false, // file strip options
 };
 
 function loadPrefs() {
@@ -86,19 +86,19 @@ function loadPrefs() {
   }
 }
 
-let clip = null; // 내부 클립보드: { w, h, pix: Uint32Array, mask: Uint8Array } — 문서가 바뀌어도 유지됩니다
+let clip = null; // internal clipboard: { w, h, pix: Uint32Array, mask: Uint8Array } - kept even when the document changes
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const sameFile = (a, b) => !!a && !!b && a.toLowerCase().replace(/\\/g, '/') === b.toLowerCase().replace(/\\/g, '/');
 const baseName = (p) => p.split(/[\\/]/).pop();
 
-// host: 편집기를 넣을 요소.
+// host: the element to put the editor in.
 // hooks: { toast(text, cls, actions), getBackup(), setBackup(on), onSaved(path, info) -> actions[], onDirtyChange(count),
-//   files() -> 일괄 처리 목록(공유), getFilter(), setFilter(text), addPaths(paths) -> 열 수 있는 경로[], removeFile(path),
+//   files() -> batch list (shared), getFilter(), setFilter(text), addPaths(paths) -> openable paths[], removeFile(path),
 //   onCurrentChange(path), isBlocked() }
 //
-// 문서 모델: S.docs 가 열린 문서(탭) 목록이고 S.doc 이 지금 보이는 문서입니다. 문서마다 픽셀·크기·기록(History)·선택(sel)·
-// 보기(view/autoFit)·원본 경로/형식을 따로 갖고, 도구·색·도구 옵션·팔레트·격자는 모든 문서가 공유합니다(P).
-// 떠 있는 층(S.float)은 문서를 떠날 때 확정합니다. 보고 있는 동안의 확대·이동은 S.view/S.autoFit 에 있다가 문서를 떠날 때 문서에 저장합니다.
+// Document model: S.docs is the list of open documents (tabs) and S.doc is the one currently shown. Each document keeps its own pixels, size, history (History), selection (sel),
+// view (view/autoFit) and source path/format, while the tool, colors, tool options, palette and grid are shared by all documents (P).
+// The floating layer (S.float) is committed when leaving a document. Zoom and pan while viewing live in S.view/S.autoFit and are saved to the document when leaving it.
 export function createEditor(host, hooks) {
   const P = loadPrefs();
   const budget = new HistoryBudget(HISTORY_BUDGET);
@@ -112,22 +112,22 @@ export function createEditor(host, hooks) {
     hover: null, // {x, y}
     space: false,
     drag: null,
-    cur: null, // 진행 중인 획
+    cur: null, // stroke in progress
     saving: false,
     pickerSlot: null,
-    float: null, // 떠 있는 층 (이동·붙여넣기 중): { x, y, w, h, pix, off, rec, origSel }
-    fx: null, // 진행 중인 효과 미리보기
+    float: null, // floating layer (while moving or pasting): { x, y, w, h, pix, off, rec, origSel }
+    fx: null, // effect preview in progress
   };
   const dpr = () => window.devicePixelRatio || 1;
   let savePrefsTimer = 0;
   const savePrefs = () => {
     clearTimeout(savePrefsTimer);
-    savePrefsTimer = setTimeout(() => { try { localStorage.setItem(PREF_KEY, JSON.stringify(P)); } catch { /* 무시 */ } }, 200);
+    savePrefsTimer = setTimeout(() => { try { localStorage.setItem(PREF_KEY, JSON.stringify(P)); } catch { /* ignore */ } }, 200);
   };
 
-  // ---------- 화면 구성 ----------
+  // ---------- UI construction ----------
 
-  const R = {}; // 자주 쓰는 요소
+  const R = {}; // frequently used elements
   let saveAllCount = 0; // number of unsaved documents, shown on the "Save all" button
   const saveAllLabel = () => (saveAllCount > 1 ? tr('editor.save_all_n', { n: saveAllCount }) : tr('editor.save_all'));
   // content / title: a string or element as-is, or a function returning text (re-applied on every language change).
@@ -248,7 +248,7 @@ export function createEditor(host, hooks) {
     const side = el('aside', 'ed-side');
     R.side = side;
 
-    // 색상
+    // Color
     const colors = section('editor.section.colors');
     const sw = el('div', 'ed-swatches');
     R.secSw = el('button', 'ed-sw ed-sw-sec');
@@ -268,27 +268,27 @@ export function createEditor(host, hooks) {
     });
     colors.append(sw, rl, R.recent);
 
-    // 도구 옵션
+    // Tool options
     R.optSec = section('editor.section.options');
     R.opts = el('div', 'ed-opts');
     R.optSec.append(R.opts);
 
-    // 효과 미리보기 (효과 메뉴를 고르면 맨 위에 나타남; 제목은 효과를 열 때 다시 채워집니다)
+    // Effect preview (appears at the top when an effect menu item is chosen; the title is refilled when the effect opens)
     R.fxSec = section('editor.section.fx');
     R.fxSec.classList.add('ed-fx');
     R.fxSec.hidden = true;
 
-    // 팔레트
+    // Palette
     const pal = buildPalette();
 
-    // 내비게이터
+    // Navigator
     const nav = section('editor.section.navigator');
     R.nav = el('canvas', 'ed-nav');
     R.navBox = el('div', 'ed-nav-box');
     R.navBox.append(R.nav);
     nav.append(R.navBox);
 
-    // 이미지 정보
+    // Image info
     const info = section('editor.section.info');
     R.info = el('dl', 'ed-info');
     R.backup = el('input');
@@ -329,7 +329,7 @@ export function createEditor(host, hooks) {
   host.append(top, body);
   buildPicker();
 
-  // ---------- 상태 → 화면 ----------
+  // ---------- State -> UI ----------
 
   function syncTop() {
     const d = S.doc;
@@ -430,7 +430,7 @@ export function createEditor(host, hooks) {
     return wrap;
   }
 
-  // 채우기와 마법봉이 함께 쓰는 허용 오차 슬라이더
+  // Tolerance slider shared by fill and magic wand
   function toleranceRow() {
     const tol = el('div', 'ed-range');
     const r = el('input');
@@ -489,7 +489,7 @@ export function createEditor(host, hooks) {
     updateCursor();
   }
 
-  // ---------- 색 선택 팝오버 ----------
+  // ---------- Color picker popover ----------
 
   function buildPicker() {
     const pop = el('div', 'ed-picker');
@@ -589,7 +589,7 @@ export function createEditor(host, hooks) {
     R.sys.value = `#${[u.r, u.g, u.b].map((v) => v.toString(16).padStart(2, '0')).join('')}`;
   }
 
-  // ---------- 문서 ----------
+  // ---------- Documents ----------
 
   function makeDoc(w, h, pix, path, name, meta = {}) {
     const off = document.createElement('canvas');
@@ -603,13 +603,13 @@ export function createEditor(host, hooks) {
       w, h, pix, px32: new Uint32Array(pix.buffer), off, octx, imageData, mark: new Uint8Array(w * h),
       path, name, indexed: !!meta.indexed, palSize: meta.colors || 0,
       history: meta.history || new History({ budget }), dirtyRect: null, colorCount: null, sel: null,
-      view: meta.view || null, // 문서를 떠날 때 저장해 두는 보기 (없으면 처음 열 때 화면에 맞춤)
+      view: meta.view || null, // view saved when leaving the document (fit to the screen on first open if none)
       autoFit: meta.autoFit ?? true,
-      preview: !!meta.preview, // 탐색으로 연 미리보기 탭 (고치거나 더블클릭하면 고정)
+      preview: !!meta.preview, // preview tab opened by browsing (pinned when edited or double-clicked)
     };
   }
 
-  // 같은 문서(경로·기록·탭 정보 유지)에서 크기나 내용만 통째로 바꾼 새 문서를 만듭니다. 선택은 해제됩니다.
+  // Create a new document from the same document (keeping path, history, tab info) with only its size or content swapped wholesale. The selection is cleared.
   function rebuildDoc(d, w, h, pix) {
     return makeDoc(w, h, pix, d.path, d.name, {
       id: d.id, indexed: d.indexed, colors: d.palSize, history: d.history, view: d.view, autoFit: d.autoFit, preview: d.preview,
@@ -617,7 +617,7 @@ export function createEditor(host, hooks) {
   }
 
   const findDocByPath = (path) => (path ? S.docs.find((d) => sameFile(d.path, path)) || null : null);
-  // 보고 있는 문서의 떠 있는 층도 아직 확정 전인 변경으로 칩니다.
+  // The floating layer of the document being viewed also counts as a change that is not committed yet.
   const isDirty = (d) => d.history.dirty || (S.doc && d.id === S.doc.id && !!S.float);
   const dirtyDocs = () => S.docs.filter(isDirty);
 
@@ -626,7 +626,7 @@ export function createEditor(host, hooks) {
   let lastCurrent = null;
   let lastActiveId = 0;
 
-  // 탭과 파일 띠를 문서 상태에 맞춰 다시 그립니다 (달라진 것이 없으면 건너뜀).
+  // Redraw the tabs and file strip to match the document state (skipped if nothing changed).
   function syncDocs(force = false) {
     const sig = S.docs.map((d) => `${d.id}:${d.name}:${d.path}:${d.preview ? 1 : 0}:${isDirty(d) ? 1 : 0}`).join('|') + `#${S.doc ? S.doc.id : 0}`;
     if (!force && sig === docSig) return;
@@ -634,7 +634,7 @@ export function createEditor(host, hooks) {
     R.tabs.render(S.docs, S.doc ? S.doc.id : 0, isDirty);
     R.strip.render();
     const id = S.doc ? S.doc.id : 0;
-    if (id !== lastActiveId) { lastActiveId = id; R.strip.scrollToCurrent(); } // 보던 문서가 바뀔 때만 띠를 맞춰 스크롤
+    if (id !== lastActiveId) { lastActiveId = id; R.strip.scrollToCurrent(); } // scroll the strip to fit only when the viewed document changes
   }
 
   function updateDirty() {
@@ -647,8 +647,8 @@ export function createEditor(host, hooks) {
     if (p !== lastCurrent) { lastCurrent = p; hooks.onCurrentChange?.(p); }
   }
 
-  // 문서를 바꿔 보여 줍니다. 떠 있는 층은 확정하고, 지금 문서의 보기(확대·위치)는 그 문서에 저장해 둡니다.
-  // o.view 가 있으면 새 문서의 보기로 쓰고(확대 유지), 없으면 문서가 저장해 둔 보기 또는 화면 맞춤을 씁니다.
+  // Switch the shown document. The floating layer is committed, and the current document's view (zoom, position) is saved to it.
+  // If o.view is given it is used as the new document's view (keeping zoom); otherwise the view saved in the document or fit-to-screen is used.
   function activateDoc(d, o = {}) {
     cancelStroke();
     cancelFx();
@@ -669,7 +669,7 @@ export function createEditor(host, hooks) {
     notifyCurrent();
   }
 
-  // 열린 문서가 하나도 없는 상태
+  // State with no open documents
   function showNone() {
     cancelStroke();
     cancelFx();
@@ -685,7 +685,7 @@ export function createEditor(host, hooks) {
     syncTop();
     syncSel();
     const d = S.doc;
-    if (d && d.preview && isDirty(d)) d.preview = false; // 고치기 시작하면 탭이 고정됩니다
+    if (d && d.preview && isDirty(d)) d.preview = false; // the tab gets pinned once editing starts
     updateDirty();
     syncDocs();
     scheduleInfo();
@@ -721,7 +721,7 @@ export function createEditor(host, hooks) {
     for (const [k, v] of rows) R.info.append(el('dt', '', k), el('dd', '', v));
   }
 
-  // ---------- 보기 (확대·이동) ----------
+  // ---------- View (zoom, pan) ----------
 
   let viewW = 0, viewH = 0;
   function measure() {
@@ -782,7 +782,7 @@ export function createEditor(host, hooks) {
     render();
   }
 
-  // ---------- 그리기 ----------
+  // ---------- Drawing ----------
 
   let rafId = 0;
   function render() {
@@ -811,7 +811,7 @@ export function createEditor(host, hooks) {
     drawOverlay();
   }
 
-  // 떠 있는 층을 캔버스로 만들어 둡니다 (내용이 바뀌면 f.off = null 로 무효화)
+  // Prepare the floating layer as a canvas (invalidate with f.off = null when its content changes)
   function floatView() {
     const f = S.float;
     if (!f) return null;
@@ -838,7 +838,7 @@ export function createEditor(host, hooks) {
       drawAnts(ctx, dpr(), S.view, Sel.edgesOf(r), r.x, r.y, phase);
     }
   }
-  // 개미 행렬 애니메이션: 선택이 있을 때만 윤곽선을 다시 그립니다.
+  // Marching-ants animation: redraw the outline only while there is a selection
   setInterval(() => {
     if (S.active && S.doc && (S.doc.sel || (S.drag && S.drag.kind === 'select'))) drawOverlay();
   }, 110);
@@ -848,7 +848,7 @@ export function createEditor(host, hooks) {
 
   const symmetric = () => P.symX || P.symY;
 
-  // 커서가 있는 곳에서 칠해질 칸들 (대칭 포함, 문서 안쪽만)
+  // Cells that will be painted at the cursor (including symmetry, only inside the document)
   function cursorCells() {
     const d = S.doc, h = S.hover;
     if (!d || !h || S.space || (S.drag && S.drag.kind === 'pan')) return null;
@@ -884,7 +884,7 @@ export function createEditor(host, hooks) {
     };
   }
 
-  // --- 획: 픽셀을 직접 쓰면서 이전 값을 기록 ---
+  // --- Stroke: write pixels directly while recording the previous values ---
 
   function newStroke(tool, color) {
     return { tool, color, idx: [], before: [], kept: [], last: null, sx: 0, sy: 0, ex: 0, ey: 0 };
@@ -899,7 +899,7 @@ export function createEditor(host, hooks) {
     }
   }
 
-  // rec(획 또는 떠 있는 층의 기록)에 이전 값을 남기면서 픽셀 하나를 씁니다. 선택 영역은 검사하지 않습니다.
+  // Write one pixel while leaving its previous value in rec (the record of a stroke or floating layer). The selection is not checked.
   function put(rec, i, c) {
     const d = S.doc, p = d.px32;
     if (p[i] === c) return;
@@ -912,7 +912,7 @@ export function createEditor(host, hooks) {
     dirtyAdd(d, i % d.w, (i / d.w) | 0);
   }
 
-  // 그리기 도구용: 선택 영역이 있으면 그 안쪽 픽셀만 바꿉니다.
+  // For drawing tools: if there is a selection, change only the pixels inside it.
   function setIdx(i, c) {
     const sel = S.doc.sel;
     if (sel && !Sel.selHas(sel, i % S.doc.w, (i / S.doc.w) | 0)) return;
@@ -933,7 +933,7 @@ export function createEditor(host, hooks) {
     rec.before.length = 0;
   }
 
-  // 기록을 패치로 만들고 표시를 지웁니다. 실제로 바뀐 픽셀이 없으면 null.
+  // Turn the record into a patch and clear the marks. null if no pixel actually changed.
   function finishRec(rec) {
     const d = S.doc;
     const n = rec.idx.length;
@@ -956,7 +956,7 @@ export function createEditor(host, hooks) {
     setIdx(y * d.w + x, c);
   }
 
-  // 대칭을 적용해 한 칸을 칠합니다.
+  // Paint one cell applying symmetry.
   function putCell(x, y, c) {
     const d = S.doc;
     setPx(x, y, c);
@@ -1060,7 +1060,7 @@ export function createEditor(host, hooks) {
     setColor(button === 2 ? 'secondary' : 'primary', norm(d.px32[y * d.w + x]));
   }
 
-  // ---------- 포인터 입력 ----------
+  // ---------- Pointer input ----------
 
   function onPointerDown(e) {
     if (!S.doc) return;
@@ -1082,7 +1082,7 @@ export function createEditor(host, hooks) {
     S.hover = { x, y };
     const color = e.button === 2 ? P.secondary : P.primary;
     let tool = P.tool;
-    if (e.altKey && tool !== 'picker' && tool !== 'select' && tool !== 'wand') tool = 'picker'; // 선택 도구에서 Alt 는 "빼기"
+    if (e.altKey && tool !== 'picker' && tool !== 'select' && tool !== 'wand') tool = 'picker'; // with a selection tool, Alt means "subtract"
     if (tool === 'picker') {
       S.drag = { kind: 'picker', id: e.pointerId, button: e.button };
       capture(e);
@@ -1113,13 +1113,13 @@ export function createEditor(host, hooks) {
     render();
   }
 
-  // 마법봉: 클릭한 픽셀과 같은 색(허용 오차 이내)인 영역을 선택합니다. Shift: 선택에 더하기, Alt: 선택에서 빼기.
-  // 완전히 투명한 픽셀(알파 0)은 RGB 와 상관없이 모두 같은 색입니다.
+  // Magic wand: select the region of the same color (within tolerance) as the clicked pixel. Shift: add to selection, Alt: subtract from selection.
+  // Fully transparent pixels (alpha 0) all count as the same color regardless of RGB.
   function wandClick(e, x, y) {
     const d = S.doc;
     commitFloat();
     const mode = e.shiftKey ? 'add' : e.altKey ? 'sub' : 'replace';
-    if (x < 0 || y < 0 || x >= d.w || y >= d.h) { // 이미지 밖 클릭 = 선택 해제 (수정 키가 없을 때)
+    if (x < 0 || y < 0 || x >= d.w || y >= d.h) { // click outside the image = deselect (when there is no modifier key)
       if (mode === 'replace') setSelection(null);
       return;
     }
@@ -1129,7 +1129,7 @@ export function createEditor(host, hooks) {
     setSelection(Sel.combineSels(d.sel, Sel.fromIndices(list, d.w), mode));
   }
 
-  // 선택·이동 도구: 선택 안쪽(또는 이동 도구)에서는 떠 있는 층을 끌고, 그 밖에서는 사각형 선택을 시작합니다.
+  // Select/move tool: inside the selection (or with the move tool) drag the floating layer; outside it, start a rectangle selection.
   function selectPointerDown(e, tool, x, y) {
     const d = S.doc;
     const inside = !!(d.sel && Sel.selHas(d.sel, x, y));
@@ -1150,7 +1150,7 @@ export function createEditor(host, hooks) {
   }
 
   function capture(e) {
-    try { R.view.setPointerCapture(e.pointerId); } catch { /* 합성 이벤트 등은 무시 */ }
+    try { R.view.setPointerCapture(e.pointerId); } catch { /* ignore synthetic events, etc. */ }
   }
   function closeOnCanvas() {
     if (document.activeElement && document.activeElement !== document.body && document.activeElement.tagName !== 'CANVAS') document.activeElement.blur();
@@ -1200,15 +1200,15 @@ export function createEditor(host, hooks) {
     if (!dr) return;
     S.drag = null;
     R.view.classList.remove('panning');
-    try { R.view.releasePointerCapture(e.pointerId); } catch { /* 무시 */ }
+    try { R.view.releasePointerCapture(e.pointerId); } catch { /* ignore */ }
     if (dr.kind === 'free' || dr.kind === 'shape') endStroke();
     else if (dr.kind === 'select') {
       const d = S.doc;
-      if (!dr.moved) { if (dr.mode === 'replace') setSelection(null); } // 그냥 클릭 = 선택 해제
+      if (!dr.moved) { if (dr.mode === 'replace') setSelection(null); } // a plain click = deselect
       else setSelection(Sel.combineRect(d.sel, dr.x0, dr.y0, dr.x1, dr.y1, dr.mode, d.w, d.h));
       syncSel();
     } else if (dr.kind === 'float') {
-      // 움직이지 않고 떠 있는 층 밖을 눌렀다면 확정
+      // Commit if the click was outside the floating layer without moving
       if (!dr.moved && S.float && !(S.doc.sel && Sel.selHas(S.doc.sel, dr.sx, dr.sy))) commitFloat();
     }
     updateCursor();
@@ -1247,7 +1247,7 @@ export function createEditor(host, hooks) {
     render();
   }
 
-  // 내비게이터: 누르거나 끌면 그 위치가 화면 가운데로 오도록 이동
+  // Navigator: press or drag to move so that the position comes to the center of the view
   function navMove(e) {
     const d = S.doc;
     if (!d) return;
@@ -1275,7 +1275,7 @@ export function createEditor(host, hooks) {
   R.view.addEventListener('wheel', onWheel, { passive: false });
   R.view.addEventListener('auxclick', (e) => e.preventDefault());
   let navDrag = false;
-  R.navBox.addEventListener('pointerdown', (e) => { navDrag = true; try { R.navBox.setPointerCapture(e.pointerId); } catch { /* 무시 */ } navMove(e); });
+  R.navBox.addEventListener('pointerdown', (e) => { navDrag = true; try { R.navBox.setPointerCapture(e.pointerId); } catch { /* ignore */ } navMove(e); });
   R.navBox.addEventListener('pointermove', (e) => { if (navDrag) navMove(e); });
   R.navBox.addEventListener('pointerup', () => { navDrag = false; });
 
@@ -1286,7 +1286,7 @@ export function createEditor(host, hooks) {
   }).observe(R.view);
   window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', render);
 
-  // ---------- 선택 영역 ----------
+  // ---------- Selection ----------
 
   const busy = () => !S.doc || !!S.cur || !!S.fx || !!S.drag;
 
@@ -1324,9 +1324,9 @@ export function createEditor(host, hooks) {
     setSelection(Sel.invertSel(S.doc.sel, S.doc.w, S.doc.h));
   }
 
-  // ---------- 떠 있는 층 (이동·붙여넣기) ----------
-  // 선택한 픽셀을 문서에서 떼어 내(원래 자리는 투명하게) f.pix 로 들고 있다가, 확정하면 새 자리에 합성합니다.
-  // 떼어 내기부터 확정까지의 변경은 f.rec 에 모아 두었다가 실행 취소 한 단계로 넣습니다. 선택 마스크는 층과 함께 움직입니다(d.sel.x/y).
+  // ---------- Floating layer (move, paste) ----------
+  // Lift the selected pixels out of the document (leaving the original spot transparent), hold them in f.pix, and composite them at the new spot on commit.
+  // Changes from lifting to committing are gathered in f.rec and entered as one undo step. The selection mask moves with the layer (d.sel.x/y).
 
   function ensureFloat() {
     if (S.float) return S.float;
@@ -1393,7 +1393,7 @@ export function createEditor(host, hooks) {
     moveFloatTo(f.x + dx, f.y + dy);
   }
 
-  // 떠 있는 층(없으면 선택 영역을 떼어 낸 뒤)을 뒤집거나 돌립니다. 돌리면 중심을 유지합니다.
+  // Flip or rotate the floating layer (or, if none, the selection after lifting it). Rotating keeps the center.
   function transformFloat(kind) {
     const f = ensureFloat(), sel = S.doc.sel;
     const r = T.transformPix(f.pix, f.w, f.h, kind);
@@ -1408,9 +1408,9 @@ export function createEditor(host, hooks) {
     render();
   }
 
-  // ---------- 클립보드 ----------
+  // ---------- Clipboard ----------
 
-  // 떠 있는 층 > 선택 영역 > 이미지 전체 순으로 복사합니다.
+  // Copy in this order: floating layer > selection > whole image.
   function copySelection(showToast = true) {
     const d = S.doc;
     if (!d) return;
@@ -1446,7 +1446,7 @@ export function createEditor(host, hooks) {
     if (!clip) { hooks.toast(tr('toast.paste_empty')); return; }
     commitFloat();
     const d = S.doc, v = S.view;
-    // 지금 보이는 영역의 왼쪽 위에 붙입니다 (문서보다 크면 0, 0)
+    // Paste at the top-left of the currently visible area (0, 0 if larger than the document)
     let px = Math.max(0, Math.ceil(-v.ox / v.zoom)), py = Math.max(0, Math.ceil(-v.oy / v.zoom));
     px = Math.max(0, Math.min(px, d.w - clip.w));
     py = Math.max(0, Math.min(py, d.h - clip.h));
@@ -1457,9 +1457,9 @@ export function createEditor(host, hooks) {
     afterChange();
   }
 
-  // ---------- 변형 · 캔버스 ----------
+  // ---------- Transform, canvas ----------
 
-  // 문서 전체를 새 픽셀 배열(w×h, Uint32Array)로 바꾸는 편집 하나. 크기가 같으면 픽셀 패치, 다르면 스냅샷 패치를 넣습니다.
+  // One edit that replaces the whole document with a new pixel array (w×h, Uint32Array). A pixel patch if the size is the same, a snapshot patch otherwise.
   function commitContent(w, h, px32) {
     const d = S.doc;
     if (w === d.w && h === d.h) {
@@ -1482,7 +1482,7 @@ export function createEditor(host, hooks) {
     return true;
   }
 
-  // 같은 문서를 새 크기·픽셀로 바꿔 끼웁니다 (기록은 유지, 선택은 해제)
+  // Swap in the same document with a new size and pixels (history kept, selection cleared)
   function setContent(w, h, pix) {
     const d = S.doc;
     const sized = d.w !== w || d.h !== h;
@@ -1582,7 +1582,7 @@ export function createEditor(host, hooks) {
     hooks.toast(tr('toast.trimmed', { w0: d.w, h0: d.h, w1: nw, h1: nh }));
   }
 
-  // ---------- 메뉴 ----------
+  // ---------- Menu ----------
 
   function closeMenu() {
     if (!R.menu) return;
@@ -1653,9 +1653,9 @@ export function createEditor(host, hooks) {
     { label: tr('editor.menu.fx_despeckle'), run: () => openEffect('despeckle') },
   ];
 
-  // ---------- 효과 (일괄 처리 기능을 현재 이미지에 적용) ----------
-  // 효과를 고르면 오른쪽 맨 위에 옵션 패널이 열리고, 옵션을 바꿀 때마다 Go(ProcessPixels)로 결과를 계산해 캔버스에 미리 보여 줍니다.
-  // 미리 보기는 임시 문서(S.doc 교체)이며 취소하면 원래 문서·보기로 돌아가고, 확인하면 편집 한 단계로 들어갑니다.
+  // ---------- Effects (apply batch features to the current image) ----------
+  // Choosing an effect opens an options panel at the top right, and each time an option changes the result is computed in Go (ProcessPixels) and previewed on the canvas.
+  // The preview is a temporary document (replacing S.doc); cancel returns to the original document and view, and confirm enters it as one edit step.
 
   const FX_SCALES = [0, 2, 3, 4, 5, 6, 8, 10, 12, 16];
   const FX_UPSCALES = [2, 3, 4, 5, 6, 8, 10, 12, 16];
@@ -1814,7 +1814,7 @@ export function createEditor(host, hooks) {
       } else {
         let pix = fromBase64(res.pixels, new Uint8ClampedArray(res.width * res.height * 4));
         let msg = res.message;
-        // 작은 조각 지우기: 선택 영역이 있으면 그 안쪽 픽셀만 결과를 쓰고 나머지는 원본을 둡니다.
+        // Erase small pieces: with a selection, write the result only for pixels inside it and keep the original elsewhere.
         if (fx.kind === 'despeckle' && d0.sel && res.width === d0.w && res.height === d0.h) {
           const proc = new Uint32Array(pix.buffer);
           const merged = d0.px32.slice();
@@ -1856,7 +1856,7 @@ export function createEditor(host, hooks) {
     showFxDoc();
   }
 
-  // 미리 보기 문서(또는 원본)를 화면에 올립니다.
+  // Put the preview document (or the original) on screen.
   function showFxDoc() {
     const fx = S.fx;
     if (!fx) return;
@@ -1872,7 +1872,7 @@ export function createEditor(host, hooks) {
     render();
   }
 
-  // 효과 패널을 닫고 원래 문서·보기로 되돌립니다.
+  // Close the effect panel and return to the original document and view.
   function closeFxUi() {
     const fx = S.fx;
     clearTimeout(fx.timer);
@@ -1903,8 +1903,8 @@ export function createEditor(host, hooks) {
     hooks.toast(tr('toast.fx_applied', { msg }));
   }
 
-  // ---------- 팔레트 패널 ----------
-  // 보여 줄 팔레트: 내 팔레트(localStorage) · 이미지에서(빈도순 최대 256색) · 저장된 팔레트(공용 폴더/Lospec) · PNG 파일
+  // ---------- Palette panel ----------
+  // Palettes shown: my palette (localStorage) · from the image (up to 256 colors by frequency) · saved palettes (shared folder/Lospec) · PNG file
 
   const PAL = { list: [], img: { colors: [], total: 0 }, selIdx: -1 };
   const palLabel = (name) => (name.toLowerCase().endsWith('.png') ? baseName(name) : name);
@@ -1940,7 +1940,7 @@ export function createEditor(host, hooks) {
       const k = (c | 0xff000000) >>> 0;
       m.set(k, (m.get(k) || 0) + 1);
     }
-    const arr = [...m].sort((a, b) => b[1] - a[1]); // 안정 정렬 — 동률이면 먼저 나온 색이 앞
+    const arr = [...m].sort((a, b) => b[1] - a[1]); // stable sort - ties keep the color that appeared first
     PAL.img = { colors: arr.slice(0, 256).map((a) => a[0]), total: arr.length };
   }
 
@@ -2017,7 +2017,7 @@ export function createEditor(host, hooks) {
     markPal();
   }
 
-  // 팔레트 칸 표시: 주 색과 같으면 굵은 테두리, 보조 색과 같으면 점선 테두리, 마지막으로 클릭한 칸은 살짝 표시
+  // Palette cell display: a thick border if equal to the primary color, a dashed border if equal to the secondary color, and a slight mark on the last clicked cell
   function markPal() {
     if (!R.palGrid) return;
     let i = 0;
@@ -2153,7 +2153,7 @@ export function createEditor(host, hooks) {
     }
   }
 
-  // ---------- 실행 취소 ----------
+  // ---------- Undo ----------
 
   function applyPatch(p, dir) {
     const d = S.doc;
@@ -2186,7 +2186,7 @@ export function createEditor(host, hooks) {
     if (p) applyPatch(p, 'redo');
   }
 
-  // ---------- 파일 · 문서(탭) ----------
+  // ---------- Files and documents (tabs) ----------
 
   const newName = () => {
     let n = 1;
@@ -2196,13 +2196,13 @@ export function createEditor(host, hooks) {
     return name(n);
   };
 
-  // 작업 중(획·효과 미리보기)에는 문서를 바꾸지 않습니다. 효과 미리보기는 안내만 하고 그대로 둡니다.
+  // Do not switch documents while work is in progress (stroke, effect preview). During an effect preview only a notice is given and nothing changes.
   function canSwitch() {
     if (S.fx) { hooks.toast(tr('toast.fx_finish_first')); return false; }
     return !S.cur;
   }
 
-  // 탭·Ctrl+Tab 으로 문서를 바꿉니다.
+  // Switch documents with tabs or Ctrl+Tab.
   function switchTo(d) {
     const cur = S.fx ? S.fx.orig : S.doc;
     if (d === cur) return true;
@@ -2231,9 +2231,9 @@ export function createEditor(host, hooks) {
     d.history.dispose();
   }
 
-  // 이미 열려 있는 파일이면 그 탭으로, 아니면 읽어서 새 탭으로 엽니다.
-  //  mode 'nav': 탐색으로 열기 — 수정하지 않은 미리보기 탭이 있으면 그 자리를 대신합니다 (이탤릭 탭).
-  //  mode 'pin': 명시적으로 열기 — 항상 새 탭이고 고정됩니다.
+  // If the file is already open, go to its tab; otherwise read it and open it in a new tab.
+  //  mode 'nav': open by browsing - replaces the unmodified preview tab if there is one (italic tab).
+  //  mode 'pin': open explicitly - always a new tab, and pinned.
   let navSeq = 0;
   async function openPath(path, mode = 'nav') {
     if (S.cur || !path) return false;
@@ -2252,7 +2252,7 @@ export function createEditor(host, hooks) {
       hooks.toast(String(err), 'failed');
       return false;
     }
-    if (mode === 'nav' && seq !== navSeq) return false; // 그 사이 다른 파일로 넘어감 (마지막 요청만 반영)
+    if (mode === 'nav' && seq !== navSeq) return false; // moved on to another file in the meantime (only the last request counts)
     const again = findDocByPath(r.path);
     if (again) { if (!switchTo(again)) return false; if (mode === 'pin') pinDoc(again); return true; }
     if (S.cur || S.fx) return false;
@@ -2265,7 +2265,7 @@ export function createEditor(host, hooks) {
     return true;
   }
 
-  // 새 문서를 탭 목록에 넣습니다. 미리보기 문서이고 수정 안 한 미리보기 탭이 있으면 그 자리를 대신하고 그 탭을 돌려줍니다.
+  // Put a new document into the tab list. If it is a preview document and there is an unmodified preview tab, it replaces that tab and returns it.
   function insertDoc(doc) {
     if (doc.preview) {
       const i = S.docs.findIndex((d) => d.preview && !isDirty(d));
@@ -2280,7 +2280,7 @@ export function createEditor(host, hooks) {
     return null;
   }
 
-  // "확대 유지": 새로 연 파일에 지금 보던 확대 배율(같은 크기면 위치까지)을 씁니다. 맞춤 상태였다면 평소처럼 맞춥니다.
+  // "Keep zoom": use the zoom level you were viewing (and the position too if the size is the same) for a newly opened file. If it was in fit mode, fit as usual.
   function keptView(doc) {
     if (!P.keepZoom || !S.doc || S.autoFit) return null;
     measure();
@@ -2289,9 +2289,9 @@ export function createEditor(host, hooks) {
     return { zoom: v.zoom, ox: (viewW - doc.w * v.zoom) / 2, oy: (viewH - doc.h * v.zoom) / 2 };
   }
 
-  // 목록의 다음(1)·이전(-1) 파일을 엽니다. 키를 빠르게 눌러도 한 번에 하나씩 차례로 처리합니다.
+  // Open the next (1) or previous (-1) file in the list. Even if keys are pressed quickly, they are handled one at a time in order.
   let stepBusy = 0;
-  // 앞선 이동이 끝난 뒤에 이어서 실행합니다 (대기는 최대 한 건).
+  // Run after the earlier move finishes (at most one waiting).
   let stepChain = Promise.resolve();
   function step(dir) {
     if (stepBusy >= 2) return;
@@ -2309,7 +2309,7 @@ export function createEditor(host, hooks) {
     const ni = i < 0 ? (dir > 0 ? 0 : list.length - 1) : i + dir;
     if (ni < 0 || ni >= list.length) { hooks.toast(tr(dir > 0 ? 'toast.last_file' : 'toast.first_file')); return; }
     const d = S.doc;
-    // 자동 저장: 고친 문서를 저장하고 넘어갑니다. 저장에 실패하면 넘어가지 않습니다.
+    // Auto-save: save the edited document and move on. If saving fails, do not move on.
     if (d && P.autoSave && isDirty(d) && d.path) {
       const r = await saveDoc(d, false);
       if (!r.ok) {
@@ -2320,7 +2320,7 @@ export function createEditor(host, hooks) {
     await openPath(list[ni].path, 'nav');
   }
 
-  // 문서를 닫습니다. 저장하지 않은 변경이 있으면 저장 / 저장 안 함 / 취소를 묻습니다. 닫았으면 true.
+  // Close a document. If there are unsaved changes, ask save / don't save / cancel. true if closed.
   async function closeDoc(d, opt = {}) {
     if (!S.docs.some((x) => x.id === d.id) || S.cur) return false;
     if (S.doc && S.doc.id === d.id) { cancelFx(); commitFloat(); }
@@ -2342,7 +2342,7 @@ export function createEditor(host, hooks) {
       }
     }
     const cur = S.docs.find((x) => x.id === d.id);
-    if (!cur) return false; // 대화상자가 떠 있는 동안 이미 닫힘
+    if (!cur) return false; // already closed while the dialog was open
     if (S.doc && S.doc.id === cur.id) {
       const i = S.docs.indexOf(cur);
       const next = S.docs[i + 1] || S.docs[i - 1];
@@ -2354,7 +2354,7 @@ export function createEditor(host, hooks) {
     return true;
   }
 
-  // 수정하지 않은 탭을 모두 닫습니다 (저장된 탭 정리).
+  // Close all unmodified tabs (clean up saved tabs).
   function closeClean() {
     if (!canSwitch()) return;
     const keep = S.docs.filter(isDirty);
@@ -2370,7 +2370,7 @@ export function createEditor(host, hooks) {
     hooks.toast(tn('toast.closed_clean', clean.length));
   }
 
-  // 목록에 파일을 더하고 첫 파일을 엽니다 (탐색 열기). 열 수 있는 경로 목록을 돌려줍니다.
+  // Add files to the list and open the first one (open by browsing). Returns the list of openable paths.
   async function addAndOpen(paths, mode = 'nav') {
     const list = await hooks.addPaths(paths);
     if (list && list.length) await openPath(list[0], mode);
@@ -2433,8 +2433,8 @@ export function createEditor(host, hooks) {
     activateDoc(doc);
   }
 
-  // 문서 하나를 저장합니다. as 이거나 경로가 없으면 저장 대화상자를 엽니다.
-  // 반환: { ok, canceled, error, res, isNewPath, backup, name } — 토스트는 부르는 쪽이 정합니다.
+  // Save one document. If as is set or there is no path, open the save dialog.
+  // Returns: { ok, canceled, error, res, isNewPath, backup, name } - the caller decides the toast.
   async function saveDoc(d, as = false) {
     if (S.saving) return { ok: false, error: tr('toast.save_busy') };
     S.saving = true;
@@ -2454,7 +2454,7 @@ export function createEditor(host, hooks) {
       cur.name = baseName(res.path);
       cur.indexed = res.format === 'indexed';
       cur.palSize = res.colors || 0;
-      // 저장하는 동안 더 고쳤다면 저장된 시점이 아니므로 계속 "변경됨"으로 둡니다.
+      // If more edits were made while saving, this is not the saved point, so it stays "modified".
       const h = cur.history;
       if (h.undoStack.length === mark.len && h.undoStack[mark.len - 1] === mark.last) h.markSaved();
       afterChange();
@@ -2472,7 +2472,7 @@ export function createEditor(host, hooks) {
     hooks.toast(tr(r.backup ? 'toast.saved_backup' : 'toast.saved', { name: r.name, format }), '', r.actions);
   }
 
-  // 현재 문서를 저장합니다. 성공하면 true.
+  // Save the current document. true on success.
   async function save(as) {
     if (S.fx || S.cur) return false;
     const d = S.doc;
@@ -2483,8 +2483,8 @@ export function createEditor(host, hooks) {
     return false;
   }
 
-  // 저장하지 않은 문서를 모두 저장합니다. 경로가 없는 새 문서(제목 없음)는 저장 대화상자를 연달아 띄우지 않고 건너뛰며,
-  // 건너뛴 문서는 알림의 버튼으로 바로 저장할 수 있습니다. 하나가 실패해도 나머지는 계속 저장합니다.
+  // Save all unsaved documents. New documents without a path (untitled) are skipped instead of opening save dialogs one after another,
+  // and a skipped document can be saved right away from the button in the notice. If one fails, the rest are still saved.
   async function saveAll() {
     if (S.fx) { canSwitch(); return; }
     if (S.cur || S.saving) return;
@@ -2509,14 +2509,14 @@ export function createEditor(host, hooks) {
     hooks.toast(parts.join(' · '), failed.length ? 'failed' : '', actions);
   }
 
-  // 편집기에 파일·폴더를 끌어다 놓았을 때: 공유 목록에 더하고 첫 파일을 엽니다.
+  // When files/folders are dropped onto the editor: add them to the shared list and open the first one.
   async function dropPaths(paths) {
     if (S.cur || S.fx) return;
     const list = await addAndOpen(paths);
     if (!list.length) hooks.toast(tr('toast.no_png'), 'failed');
   }
 
-  // ---------- 키보드 ----------
+  // ---------- Keyboard ----------
 
   function onKeyDown(e) {
     if (!S.active || isModalOpen() || hooks.isBlocked?.()) return;
@@ -2529,7 +2529,7 @@ export function createEditor(host, hooks) {
     if (e.key === 'Alt') { e.preventDefault(); return; }
     if (e.key === 'Shift' && S.drag && S.drag.kind === 'shape' && !e.repeat) { drawShape(S.drag.x, S.drag.y, true); return; }
 
-    // 파일·문서 이동은 어느 도구에서나 됩니다 (글자를 입력하는 칸에서는 제외)
+    // Moving between files/documents works with any tool (except in fields where text is typed)
     if (!entering && !ctrl && !e.shiftKey) {
       if (!e.altKey && (e.key === 'PageDown' || e.key === 'PageUp')) { e.preventDefault(); step(e.key === 'PageDown' ? 1 : -1); return; }
       if (e.altKey && (e.key === 'ArrowRight' || e.key === 'ArrowLeft')) { e.preventDefault(); step(e.key === 'ArrowRight' ? 1 : -1); return; }
@@ -2543,7 +2543,7 @@ export function createEditor(host, hooks) {
     }
     if (ctrl && e.altKey && !e.shiftKey && k === 's') { e.preventDefault(); saveAll(); return; }
 
-    // 효과 미리보기 중에는 확인/취소만 받습니다.
+    // During an effect preview, only confirm/cancel are accepted.
     if (S.fx) {
       if (e.key === 'Escape') { e.preventDefault(); cancelFx(); }
       else if (e.key === 'Enter' && t.tagName !== 'BUTTON' && t.tagName !== 'SELECT') { e.preventDefault(); applyEffect(); }
@@ -2635,7 +2635,7 @@ export function createEditor(host, hooks) {
   window.addEventListener('keyup', onKeyUp);
   window.addEventListener('blur', () => { S.space = false; R.view.classList.remove('pan-ready'); });
 
-  // ---------- 시작 ----------
+  // ---------- Start ----------
 
   syncTools();
   syncColors();
@@ -2645,7 +2645,7 @@ export function createEditor(host, hooks) {
   refreshPalList();
 
   return {
-    // 파일을 엽니다. 기본은 탐색 열기(미리보기 탭), opt.pin 이면 고정된 새 탭
+    // Open a file. The default is open by browsing (preview tab); with opt.pin, a pinned new tab
     open: (path, opt = {}) => openPath(path, opt.pin ? 'pin' : 'nav'),
     openDialog,
     newDialog,
@@ -2654,7 +2654,7 @@ export function createEditor(host, hooks) {
     isDirty: () => dirtyDocs().length > 0,
     dirtyCount: () => dirtyDocs().length,
     currentPath: () => S.doc?.path || '',
-    // 일괄 처리 목록이 바뀌었을 때(추가·제거·필터·썸네일 갱신) 파일 띠를 다시 그립니다.
+    // Redraw the file strip when the batch list changes (add, remove, filter, thumbnail refresh).
     filesChanged: () => R.strip.render(),
     // Called by main.js after the language changed and the Go language has been updated:
     // re-applies every label and re-renders the dynamic parts (the effect preview is recomputed in the new language).
@@ -2687,7 +2687,7 @@ export function createEditor(host, hooks) {
         cancelFx();
       }
     },
-    // 개발·검증용: 현재 문서 상태 확인
+    // For development/verification: check the current document state
     debug: () => ({ doc: S.doc, P, view: S.view }),
   };
 }

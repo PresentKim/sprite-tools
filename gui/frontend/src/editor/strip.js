@@ -1,11 +1,11 @@
-// 편집기의 파일 띠: 일괄 처리 목록과 같은 파일들을 썸네일로 보여 주고 클릭하면 엽니다.
-// 목록 자체는 일괄 처리 화면(main.js)이 갖고 있고, 여기서는 읽어서 그리기만 합니다 (hooks 로 받음).
+// The editor's file strip: shows the same files as the batch list as thumbnails, and opens one on click.
+// The list itself is owned by the batch screen (main.js); this only reads and draws it (received through hooks).
 import { t as tr } from '../i18n/index.js';
 import { el, localized } from './ui.js';
 
 export const normPath = (p) => (p || '').toLowerCase().split('\\').join('/');
 
-// 띠에 보일 파일들: 오류 파일을 빼고, 이름 필터(소문자)에 맞는 것만.
+// Files shown in the strip: excluding error files, and only those matching the name filter (lowercase).
 export function visibleList(files, filter) {
   const f = (filter || '').trim().toLowerCase();
   return files.filter((x) => !x.error && (!f || x.name.toLowerCase().includes(f)));
@@ -21,7 +21,7 @@ const localUrl = (f) => `/local?path=${encodeURIComponent(f.path)}&v=${f.v || 0}
 export function createStrip(o) {
   const root = el('aside', 'ed-strip');
 
-  // 접힌 상태의 얇은 막대
+  // Thin bar in the collapsed state
   const rail = el('div', 'ed-strip-rail');
   const expand = el('button', 'ed-strip-toggle', '▸');
   expand.type = 'button';
@@ -30,7 +30,7 @@ export function createStrip(o) {
   const railCount = el('span', 'ed-strip-railcount', '');
   rail.append(expand, railCount);
 
-  // 펼친 상태
+  // Expanded state
   const full = el('div', 'ed-strip-full');
   const head = el('div', 'ed-strip-head');
   const title = el('span', 'ed-strip-title ellipsis');
@@ -153,7 +153,7 @@ export function createStrip(o) {
       if (r.sub.textContent !== sub) r.sub.textContent = sub;
       r.el.title = f.path;
       const v = f.v || 0;
-      if (r.v !== v) { // 썸네일은 파일이 바뀌었을 때만 다시 불러옵니다
+      if (r.v !== v) { // thumbnails are reloaded only when the file has changed
         r.v = v;
         if (!r.img.isConnected) r.thumb.append(r.img);
         r.img.src = localUrl(f);

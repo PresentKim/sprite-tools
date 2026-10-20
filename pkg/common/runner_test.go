@@ -17,11 +17,11 @@ func TestOutputPath(t *testing.T) {
 		in   string
 		want string
 	}{
-		{"접미사", Options{Suffix: "_out"}, filepath.Join("d", "a.png"), filepath.Join("d", "a_out.png")},
-		{"확장자 없음", Options{Suffix: "_out"}, "a", "a_out"},
-		{"덮어쓰기", Options{InPlace: true, Suffix: "_x"}, "a.png", "a.png"},
-		{"출력 없음", Options{NoOutput: true, Suffix: "_x"}, "a.png", ""},
-		{"출력 없음이 덮어쓰기보다 우선", Options{NoOutput: true, InPlace: true}, "a.png", ""},
+		{"suffix", Options{Suffix: "_out"}, filepath.Join("d", "a.png"), filepath.Join("d", "a_out.png")},
+		{"no extension", Options{Suffix: "_out"}, "a", "a_out"},
+		{"in place", Options{InPlace: true, Suffix: "_x"}, "a.png", "a.png"},
+		{"no output", Options{NoOutput: true, Suffix: "_x"}, "a.png", ""},
+		{"no output takes precedence over in place", Options{NoOutput: true, InPlace: true}, "a.png", ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -38,10 +38,10 @@ func TestValidate(t *testing.T) {
 		o       Options
 		wantErr bool
 	}{
-		{"접미사 있음", Options{Suffix: "_x"}, false},
-		{"접미사 없음", Options{}, true},
-		{"덮어쓰기", Options{InPlace: true}, false},
-		{"출력 없음", Options{NoOutput: true}, false},
+		{"with suffix", Options{Suffix: "_x"}, false},
+		{"without suffix", Options{}, true},
+		{"in place", Options{InPlace: true}, false},
+		{"no output", Options{NoOutput: true}, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -52,7 +52,7 @@ func TestValidate(t *testing.T) {
 	}
 }
 
-// touch: 디렉터리를 만들고 빈 파일을 생성합니다.
+// touch creates the directory and an empty file.
 func touch(t *testing.T, path string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -63,7 +63,7 @@ func touch(t *testing.T, path string) {
 	}
 }
 
-// names: 루트 기준 상대 경로 목록(슬래시 구분)으로 변환합니다.
+// names converts to a list of paths relative to the root (slash-separated).
 func names(t *testing.T, root string, files []string) []string {
 	t.Helper()
 	var out []string
@@ -78,7 +78,7 @@ func names(t *testing.T, root string, files []string) []string {
 }
 
 func TestCollectFiles(t *testing.T) {
-	// 공통 구조:
+	// Common layout:
 	//   a.png, B.PNG, c.txt, a_out.png
 	//   sub/d.png, sub/deep/e.png
 	//   .hidden/f.png, skip/g.png
@@ -100,17 +100,17 @@ func TestCollectFiles(t *testing.T) {
 		want []string
 	}{
 		{
-			"비재귀: 하위 디렉터리 제외, 대소문자 무시",
+			"non-recursive: excludes subdirectories, case-insensitive",
 			func(root string) Options { return Options{Roots: []string{root}, Suffix: "_out"} },
 			[]string{"B.PNG", "a.png"},
 		},
 		{
-			"재귀: 숨김 디렉터리 제외",
+			"recursive: excludes hidden directories",
 			func(root string) Options { return Options{Roots: []string{root}, Suffix: "_out", Recursive: true} },
 			[]string{"B.PNG", "a.png", "skip/g.png", "sub/d.png", "sub/deep/e.png"},
 		},
 		{
-			"ExcludeDirs 제외",
+			"ExcludeDirs excluded",
 			func(root string) Options {
 				return Options{Roots: []string{root}, Suffix: "_out", Recursive: true,
 					ExcludeDirs: []string{filepath.Join(root, "skip"), filepath.Join(root, "sub", "deep")}}
@@ -118,12 +118,12 @@ func TestCollectFiles(t *testing.T) {
 			[]string{"B.PNG", "a.png", "sub/d.png"},
 		},
 		{
-			"InPlace 에서는 이전 출력도 포함",
+			"InPlace also includes earlier outputs",
 			func(root string) Options { return Options{Roots: []string{root}, InPlace: true} },
 			[]string{"B.PNG", "a.png", "a_out.png"},
 		},
 		{
-			"패턴 지정 (대문자 패턴도 허용)",
+			"pattern given (uppercase pattern also accepted)",
 			func(root string) Options { return Options{Roots: []string{root}, Pattern: "*.TXT", Suffix: "_out"} },
 			[]string{"c.txt"},
 		},
@@ -152,7 +152,7 @@ func TestCollectFilesExplicitFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// 직접 지정한 파일은 패턴/접미사와 관계없이 포함됩니다.
+	// Directly given files are included regardless of pattern/suffix.
 	want := []string{txt, out}
 	if !slices.Equal(got, want) {
 		t.Errorf("got %v, want %v", got, want)
@@ -164,7 +164,7 @@ func TestCollectFilesDedupAndSort(t *testing.T) {
 	for _, n := range []string{"z.png", "m.png", "a.png"} {
 		touch(t, filepath.Join(root, n))
 	}
-	// 같은 파일이 디렉터리와 직접 지정으로 중복해서 들어옴
+	// The same file comes in twice, via a directory and directly
 	got, err := CollectFiles(Options{
 		Roots:  []string{root, filepath.Join(root, "a.png"), root},
 		Suffix: "_out",
@@ -181,10 +181,10 @@ func TestCollectFilesDedupAndSort(t *testing.T) {
 func TestCollectFilesErrors(t *testing.T) {
 	root := t.TempDir()
 	if _, err := CollectFiles(Options{Roots: []string{filepath.Join(root, "nope")}, Suffix: "_o"}); err == nil {
-		t.Error("없는 경로는 에러여야 합니다")
+		t.Error("a nonexistent path should be an error")
 	}
 	if _, err := CollectFiles(Options{Roots: []string{root}, Pattern: "[", Suffix: "_o"}); err == nil {
-		t.Error("잘못된 패턴은 에러여야 합니다")
+		t.Error("an invalid pattern should be an error")
 	}
 }
 
@@ -201,13 +201,13 @@ func TestRunFilesCounts(t *testing.T) {
 	task := func(in, out string) (string, error) {
 		switch in {
 		case "skip.png":
-			return "", Skip("건너뜀 %s", in)
+			return "", Skip("skipped %s", in)
 		case "fail.png":
 			return "", errors.New("boom")
 		case "panic.png":
 			panic("oops")
 		}
-		return "완료", nil
+		return "done", nil
 	}
 	byInput := map[string]Result{}
 	sum := RunFiles(context.Background(), files, Options{Suffix: "_o", Threads: 3}, task, func(r Result) {
@@ -218,7 +218,7 @@ func TestRunFilesCounts(t *testing.T) {
 	}
 	if byInput["skip.png"].Status != StatusSkipped || byInput["fail.png"].Status != StatusFailed ||
 		byInput["panic.png"].Status != StatusFailed || byInput["ok.png"].Status != StatusDone {
-		t.Errorf("상태가 올바르지 않습니다: %+v", byInput)
+		t.Errorf("unexpected state: %+v", byInput)
 	}
 	if byInput["ok.png"].Output != "ok_o.png" {
 		t.Errorf("Output = %q", byInput["ok.png"].Output)
@@ -233,7 +233,7 @@ func TestRunFilesReport(t *testing.T) {
 			func(in, out string) (string, error) { return "", nil },
 			func(r Result) { results = append(results, r) })
 		if len(results) != len(files) || sum.Done != len(files) {
-			t.Fatalf("threads=%d: report %d회, summary=%+v", threads, len(results), sum)
+			t.Fatalf("threads=%d: report called %d times, summary=%+v", threads, len(results), sum)
 		}
 		seen := map[int]bool{}
 		for i, r := range results {
@@ -244,7 +244,7 @@ func TestRunFilesReport(t *testing.T) {
 				t.Errorf("threads=%d: Total = %d", threads, r.Total)
 			}
 			if seen[r.Index] {
-				t.Errorf("threads=%d: Index %d 중복", threads, r.Index)
+				t.Errorf("threads=%d: duplicate Index %d", threads, r.Index)
 			}
 			seen[r.Index] = true
 		}
@@ -259,10 +259,10 @@ func TestRunFilesCanceledBeforeStart(t *testing.T) {
 		func(in, out string) (string, error) { ran.Add(1); return "", nil },
 		func(Result) { reported.Add(1) })
 	if !sum.Canceled {
-		t.Error("Canceled 가 true 여야 합니다")
+		t.Error("Canceled should be true")
 	}
 	if ran.Load() != 0 || reported.Load() != 0 || sum.Done+sum.Skipped+sum.Failed != 0 {
-		t.Errorf("처리되면 안 됩니다: ran=%d reported=%d sum=%+v", ran.Load(), reported.Load(), sum)
+		t.Errorf("nothing should be processed: ran=%d reported=%d sum=%+v", ran.Load(), reported.Load(), sum)
 	}
 }
 
@@ -283,11 +283,11 @@ func TestOutputForOutDir(t *testing.T) {
 		in   Input
 		want string
 	}{
-		{"루트 기준 상대 경로 유지", o, Input{filepath.Join(root, "sub", "a.png"), root}, filepath.Join("out", "sub", "a-x.png")},
-		{"루트 바로 아래 파일", o, Input{filepath.Join(root, "a.png"), root}, filepath.Join("out", "a-x.png")},
-		{"직접 지정한 파일은 OutDir 바로 아래", o, Input{Path: filepath.Join("elsewhere", "deep", "a.png")}, filepath.Join("out", "a-x.png")},
-		{"접미사 없이", Options{OutDir: "out"}, Input{filepath.Join(root, "sub", "a.png"), root}, filepath.Join("out", "sub", "a.png")},
-		{"OutDir 없으면 원본 옆", Options{Suffix: "-x"}, Input{filepath.Join(root, "a.png"), root}, filepath.Join(root, "a-x.png")},
+		{"keeps path relative to root", o, Input{filepath.Join(root, "sub", "a.png"), root}, filepath.Join("out", "sub", "a-x.png")},
+		{"file directly under root", o, Input{filepath.Join(root, "a.png"), root}, filepath.Join("out", "a-x.png")},
+		{"directly given file goes right under OutDir", o, Input{Path: filepath.Join("elsewhere", "deep", "a.png")}, filepath.Join("out", "a-x.png")},
+		{"without suffix", Options{OutDir: "out"}, Input{filepath.Join(root, "sub", "a.png"), root}, filepath.Join("out", "sub", "a.png")},
+		{"without OutDir, next to the original", Options{Suffix: "-x"}, Input{filepath.Join(root, "a.png"), root}, filepath.Join(root, "a-x.png")},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -300,13 +300,13 @@ func TestOutputForOutDir(t *testing.T) {
 
 func TestValidateOutDir(t *testing.T) {
 	if err := (Options{InPlace: true, OutDir: "out"}).Validate(); err == nil {
-		t.Error("InPlace + OutDir 은 에러여야 합니다")
+		t.Error("InPlace + OutDir should be an error")
 	}
 	if err := (Options{OutDir: "out"}).Validate(); err != nil {
-		t.Errorf("OutDir 만 있으면 접미사가 비어도 됩니다: %v", err)
+		t.Errorf("OutDir alone should allow an empty suffix: %v", err)
 	}
 	if err := (Options{}).Validate(); err == nil {
-		t.Error("접미사도 OutDir 도 없으면 에러여야 합니다")
+		t.Error("neither suffix nor OutDir should be an error")
 	}
 }
 
@@ -336,7 +336,7 @@ func TestCollectInputsRoots(t *testing.T) {
 	}
 	for p, r := range want {
 		if g, ok := got[p]; !ok || g != r {
-			t.Errorf("%s: root = %q (있음=%v), want %q", p, g, ok, r)
+			t.Errorf("%s: root = %q (present=%v), want %q", p, g, ok, r)
 		}
 	}
 }
@@ -357,7 +357,7 @@ func TestCollectFilesExcludesOutDir(t *testing.T) {
 }
 
 func TestOutDirKeepsOwnOutputSkipping(t *testing.T) {
-	// 출력 폴더가 원본 폴더 자체이면 이전 출력(접미사 파일)은 입력에서 빠져야 합니다.
+	// When the output folder is the source folder itself, earlier outputs (suffixed files) must be dropped from the input.
 	root := t.TempDir()
 	touch(t, filepath.Join(root, "a.png"))
 	touch(t, filepath.Join(root, "a-x.png"))
@@ -389,33 +389,33 @@ func TestRunInputsOutDir(t *testing.T) {
 	}
 	for _, rel := range []string{"a-x.png", filepath.Join("sub", "a-x.png")} {
 		if _, err := os.Stat(filepath.Join(outDir, rel)); err != nil {
-			t.Errorf("%s 가 만들어져야 합니다: %v", rel, err)
+			t.Errorf("%s should have been created: %v", rel, err)
 		}
 		if !outs[filepath.Join(outDir, rel)] {
-			t.Errorf("결과에 출력 경로 %s 가 없습니다", rel)
+			t.Errorf("result lacks output path %s", rel)
 		}
 	}
 }
 
 func TestPlanOutputsConflicts(t *testing.T) {
 	root := t.TempDir()
-	// 접미사 없이 같은 폴더로 내보내면 원본을 덮어쓰게 되므로 실패 처리됩니다.
+	// Exporting to the same folder without a suffix would overwrite the original, so it is treated as a failure.
 	in := Input{Path: filepath.Join(root, "a.png"), Root: root}
 	plans := Options{OutDir: root}.PlanOutputs([]Input{in})
 	if plans[0].Err == nil {
-		t.Error("원본과 같은 경로는 에러여야 합니다")
+		t.Error("the same path as the original should be an error")
 	}
-	// 직접 지정한 서로 다른 폴더의 같은 이름 파일이 OutDir 에서 겹침
+	// Same-named files from different directories given directly collide in OutDir
 	a := Input{Path: filepath.Join(root, "x", "a.png")}
 	b := Input{Path: filepath.Join(root, "y", "a.png")}
 	plans = Options{OutDir: filepath.Join(root, "out")}.PlanOutputs([]Input{a, b})
 	if plans[0].Err != nil || plans[1].Err == nil {
-		t.Errorf("두 번째만 충돌이어야 합니다: %+v", plans)
+		t.Errorf("only the second should be a collision: %+v", plans)
 	}
-	// 덮어쓰기는 검사하지 않음
+	// Overwriting is not checked
 	plans = Options{InPlace: true}.PlanOutputs([]Input{in})
 	if plans[0].Err != nil {
-		t.Errorf("InPlace 는 허용: %v", plans[0].Err)
+		t.Errorf("InPlace is allowed: %v", plans[0].Err)
 	}
 }
 

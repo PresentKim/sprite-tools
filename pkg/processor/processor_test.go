@@ -107,7 +107,7 @@ func TestSlice(t *testing.T) {
 	dir := t.TempDir()
 	in := filepath.Join(dir, "sheet.png")
 	img := image.NewNRGBA(image.Rect(0, 0, 8, 4))
-	img.Set(0, 0, color.NRGBA{1, 2, 3, 255}) // 첫 프레임만 내용 있음
+	img.Set(0, 0, color.NRGBA{1, 2, 3, 255}) // only the first frame has content
 	common.SavePNG(in, img)
 	msg, err := SliceFile(in, 4, 4, "", false)
 	if err != nil {
@@ -136,22 +136,22 @@ func TestReduceToCount(t *testing.T) {
 			}
 		}
 		if len(colors) > max {
-			t.Errorf("max %d: 색상 %d개 (%s)", max, len(colors), msg)
+			t.Errorf("max %d: %d colors (%s)", max, len(colors), msg)
 		}
 	}
 }
 
 func TestReduceToCountSkip(t *testing.T) {
-	src := goldenNRGBA(64, 48) // 불투명 색상 28개
+	src := goldenNRGBA(64, 48) // 28 opaque colors
 	if _, _, err := ReduceToCount(src, 28); !common.IsSkip(err) {
-		t.Fatalf("이미 충분히 적으면 Skip 이어야 함: %v", err)
+		t.Fatalf("should be Skip when already few enough: %v", err)
 	}
 	if _, _, err := ReduceToCount(src, 0); err == nil {
-		t.Fatal("0 은 오류여야 함")
+		t.Fatal("0 should be an error")
 	}
 }
 
-// 원점에서 시작하지만 행 간격(Stride)이 너비보다 큰 부분 이미지도 촘촘한 이미지와 같은 결과를 내야 합니다.
+// A sub-image that starts at the origin but whose row stride (Stride) is larger than its width must give the same result as a tightly packed image.
 func TestOriginSubImageStride(t *testing.T) {
 	wide := image.NewNRGBA(image.Rect(0, 0, 16, 4))
 	for y := 0; y < 4; y++ {

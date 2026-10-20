@@ -49,11 +49,11 @@ func TestLoadImageRGBAKeepsLowAlpha(t *testing.T) {
 		t.Fatal(err)
 	}
 	if got.Width != 2 || got.Height != 1 || got.Indexed {
-		t.Fatalf("메타 정보가 다릅니다: %+v", got)
+		t.Fatalf("metadata differs: %+v", got)
 	}
 	want := []byte{200, 100, 50, 3, 1, 2, 3, 255}
 	if !bytes.Equal(decodeB64(t, got.Pixels), want) {
-		t.Errorf("픽셀 = %v, want %v", decodeB64(t, got.Pixels), want)
+		t.Errorf("pixels = %v, want %v", decodeB64(t, got.Pixels), want)
 	}
 }
 
@@ -70,11 +70,11 @@ func TestLoadImageRGBAPaletted(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !got.Indexed || got.Colors != 3 {
-		t.Fatalf("인덱스 정보가 다릅니다: %+v", got)
+		t.Fatalf("index info differs: %+v", got)
 	}
 	want := []byte{10, 20, 30, 255, 0, 0, 0, 0, 250, 0, 0, 7}
 	if !bytes.Equal(decodeB64(t, got.Pixels), want) {
-		t.Errorf("픽셀 = %v, want %v", decodeB64(t, got.Pixels), want)
+		t.Errorf("pixels = %v, want %v", decodeB64(t, got.Pixels), want)
 	}
 }
 
@@ -90,52 +90,52 @@ func TestSaveImageRGBARGBAAndBackup(t *testing.T) {
 		t.Fatal(err)
 	}
 	if res.Format != "rgba" || res.Backup == "" || res.Bytes == 0 {
-		t.Fatalf("결과가 다릅니다: %+v", res)
+		t.Fatalf("result differs: %+v", res)
 	}
 	bak, err := os.ReadFile(res.Backup)
 	if err != nil || !bytes.Equal(bak, old) {
-		t.Errorf("백업이 원본과 다릅니다: %v", err)
+		t.Errorf("backup differs from the original: %v", err)
 	}
 	if filepath.Base(filepath.Dir(filepath.Dir(res.Backup))) != common.BackupDirName {
-		t.Errorf("백업 위치: %s", res.Backup)
+		t.Errorf("backup location: %s", res.Backup)
 	}
 	back, err := loadImageRGBA(p)
 	if err != nil || !bytes.Equal(decodeB64(t, back.Pixels), pix) {
-		t.Errorf("다시 읽은 픽셀이 다릅니다: %v %v", err, back)
+		t.Errorf("re-read pixels differ: %v %v", err, back)
 	}
 
-	// backup=false 이면 백업을 만들지 않고, 새 파일도 백업 대상이 아닙니다.
+	// With backup=false no backup is made, and a new file is not a backup target either.
 	n := filepath.Join(dir, "new.png")
 	r2, err := saveImageRGBA(n, "", 2, 1, b64(pix), true)
 	if err != nil || r2.Backup != "" {
-		t.Errorf("새 파일은 백업이 없어야 합니다: %+v %v", r2, err)
+		t.Errorf("a new file should have no backup: %+v %v", r2, err)
 	}
 	r3, err := saveImageRGBA(p, p, 2, 1, b64(pix), false)
 	if err != nil || r3.Backup != "" {
-		t.Errorf("backup=false 인데 백업됨: %+v %v", r3, err)
+		t.Errorf("backed up although backup=false: %+v %v", r3, err)
 	}
 }
 
 func TestSaveImageRGBAValidation(t *testing.T) {
 	dir := t.TempDir()
 	if _, err := saveImageRGBA(filepath.Join(dir, "a.txt"), "", 1, 1, b64(make([]byte, 4)), false); err == nil {
-		t.Error("PNG 가 아닌 확장자는 거부해야 합니다")
+		t.Error("a non-PNG extension should be rejected")
 	}
 	if _, err := saveImageRGBA(filepath.Join(dir, "a.png"), "", 2, 2, b64(make([]byte, 4)), false); err == nil {
-		t.Error("크기가 맞지 않으면 거부해야 합니다")
+		t.Error("a size mismatch should be rejected")
 	}
 	if _, err := saveImageRGBA(filepath.Join(dir, "a.png"), "", 0, 2, "", false); err == nil {
-		t.Error("0 크기는 거부해야 합니다")
+		t.Error("a zero size should be rejected")
 	}
 }
 
-// 인덱스 PNG 왕복: 원본 팔레트 순서 유지, 새 색은 뒤에 추가, 투명은 원본의 투명 인덱스.
+// Indexed PNG round trip: keep the original palette order, append new colors at the end, transparency uses the original transparent index.
 func TestSaveIndexedRoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	p := filepath.Join(dir, "idx.png")
 	pal := color.Palette{
 		color.NRGBA{10, 10, 10, 255},
-		color.NRGBA{255, 255, 255, 0}, // 투명이 1번
+		color.NRGBA{255, 255, 255, 0}, // transparent is entry 1
 		color.NRGBA{200, 0, 0, 255},
 		color.NRGBA{0, 200, 0, 255},
 	}
@@ -143,7 +143,7 @@ func TestSaveIndexedRoundTrip(t *testing.T) {
 	img.Pix = []uint8{0, 1, 2, 3}
 	writePNG(t, p, img)
 
-	// 초록을 파랑으로 바꾸고 투명 픽셀은 (임의 RGB, 알파 0) 으로 둡니다.
+	// Change green to blue and leave the transparent pixel as (arbitrary RGB, alpha 0).
 	pix := []byte{
 		10, 10, 10, 255,
 		77, 66, 55, 0,
@@ -155,7 +155,7 @@ func TestSaveIndexedRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	if res.Format != "indexed" {
-		t.Fatalf("인덱스로 저장되어야 합니다: %+v", res)
+		t.Fatalf("should be saved as indexed: %+v", res)
 	}
 	data, _ := os.ReadFile(p)
 	dec, err := png.Decode(bytes.NewReader(data))
@@ -164,31 +164,31 @@ func TestSaveIndexedRoundTrip(t *testing.T) {
 	}
 	got, ok := dec.(*image.Paletted)
 	if !ok {
-		t.Fatalf("Paletted 가 아닙니다: %T", dec)
+		t.Fatalf("not Paletted: %T", dec)
 	}
-	// 원본 항목 유지(미사용인 초록 포함) + 새 파랑 추가
+	// Original entries kept (including the unused green) + new blue added
 	if len(got.Palette) != 5 {
-		t.Fatalf("팔레트 수 = %d, want 5", len(got.Palette))
+		t.Fatalf("palette size = %d, want 5", len(got.Palette))
 	}
 	for i, c := range pal {
 		w := color.NRGBAModel.Convert(c).(color.NRGBA)
 		g := color.NRGBAModel.Convert(got.Palette[i]).(color.NRGBA)
 		if w != g {
-			t.Errorf("팔레트 %d = %v, want %v", i, g, w)
+			t.Errorf("palette %d = %v, want %v", i, g, w)
 		}
 	}
 	if got.Pix[0] != 0 || got.Pix[1] != 1 || got.Pix[2] != 2 || got.Pix[3] != 4 {
-		t.Errorf("인덱스 = %v", got.Pix)
+		t.Errorf("indices = %v", got.Pix)
 	}
 
-	// 다시 불러오면 투명 픽셀은 원본의 투명 항목 색, 나머지는 그대로입니다.
+	// Loaded again, the transparent pixel has the color of the original transparent entry and the rest are unchanged.
 	back, err := loadImageRGBA(p)
 	if err != nil {
 		t.Fatal(err)
 	}
 	bp := decodeB64(t, back.Pixels)
 	if bp[7] != 0 || !bytes.Equal(bp[8:], pix[8:]) || !bytes.Equal(bp[:4], pix[:4]) {
-		t.Errorf("왕복 결과가 다릅니다: %v", bp)
+		t.Errorf("round-trip result differs: %v", bp)
 	}
 }
 
@@ -209,10 +209,10 @@ func TestSaveIndexedAddsTransparentAtZero(t *testing.T) {
 	dec, _ := png.Decode(bytes.NewReader(data))
 	got := dec.(*image.Paletted)
 	if c := color.NRGBAModel.Convert(got.Palette[0]).(color.NRGBA); c.A != 0 {
-		t.Errorf("0번이 투명이어야 합니다: %v", c)
+		t.Errorf("entry 0 should be transparent: %v", c)
 	}
 	if got.Pix[0] != 0 || got.Pix[1] != 2 {
-		t.Errorf("인덱스 = %v", got.Pix)
+		t.Errorf("indices = %v", got.Pix)
 	}
 }
 
@@ -229,17 +229,17 @@ func TestSaveIndexedFallsBackOver256(t *testing.T) {
 	}
 	res, err := saveImageRGBA(p, p, n, 1, b64(pix), false)
 	if err != nil || res.Format != "rgba" {
-		t.Fatalf("256색 초과는 rgba 여야 합니다: %+v %v", res, err)
+		t.Fatalf("more than 256 colors should be rgba: %+v %v", res, err)
 	}
 	data, _ := os.ReadFile(p)
 	dec, _ := png.Decode(bytes.NewReader(data))
 	if _, ok := dec.(*image.Paletted); ok {
-		t.Errorf("인덱스가 아니어야 합니다: %T", dec)
+		t.Errorf("should not be indexed: %T", dec)
 	}
 }
 
 func TestSaveIndexedDropsUnusedWhenFull(t *testing.T) {
-	// 원본 256색 중 일부만 쓰고 새 색을 더하면, 쓰이지 않는 원본 항목을 버려 256개 이내로 맞춥니다.
+	// If only some of the original 256 colors are used and new colors are added, unused original entries are dropped to fit within 256.
 	dir := t.TempDir()
 	p := filepath.Join(dir, "idx.png")
 	pal := make(color.Palette, 256)
@@ -272,7 +272,7 @@ func pixOf(t *testing.T, w, h int, f func(x, y int) color.NRGBA) string {
 
 func TestProcessPixelsReduceMaxColors(t *testing.T) {
 	a := NewApp()
-	// 비슷한 빨강 3가지 + 파랑 1가지 → 2색으로 줄이기
+	// Reduce 3 similar reds + 1 blue to 2 colors
 	src := pixOf(t, 4, 1, func(x, y int) color.NRGBA {
 		return [...]color.NRGBA{{250, 0, 0, 255}, {252, 2, 0, 255}, {255, 0, 2, 255}, {0, 0, 255, 255}}[x]
 	})
@@ -281,7 +281,7 @@ func TestProcessPixelsReduceMaxColors(t *testing.T) {
 		t.Fatal(err)
 	}
 	if res.Skipped || res.Width != 4 || res.Height != 1 {
-		t.Fatalf("결과가 다릅니다: %+v", res)
+		t.Fatalf("result differs: %+v", res)
 	}
 	got := decodeB64(t, res.Pixels)
 	seen := map[[4]byte]bool{}
@@ -289,7 +289,7 @@ func TestProcessPixelsReduceMaxColors(t *testing.T) {
 		seen[[4]byte{got[i], got[i+1], got[i+2], got[i+3]}] = true
 	}
 	if len(seen) != 2 {
-		t.Errorf("색상 수 = %d, want 2 (%v)", len(seen), got)
+		t.Errorf("color count = %d, want 2 (%v)", len(seen), got)
 	}
 }
 
@@ -301,28 +301,28 @@ func TestProcessPixelsUpscaleChangesSize(t *testing.T) {
 		t.Fatal(err)
 	}
 	if res.Width != 6 || res.Height != 3 {
-		t.Fatalf("크기 = %dx%d, want 6x3", res.Width, res.Height)
+		t.Fatalf("size = %dx%d, want 6x3", res.Width, res.Height)
 	}
 	got := decodeB64(t, res.Pixels)
 	if len(got) != 6*3*4 || got[0] != 10 || got[3*4] != 11 || got[(2*6+5)*4] != 11 {
-		t.Errorf("확대 픽셀이 다릅니다")
+		t.Errorf("upscaled pixels differ")
 	}
 }
 
 func TestProcessPixelsSkipAndErrors(t *testing.T) {
 	a := NewApp()
-	// 이미 여백이 없는 이미지의 trim 은 건너뜀
+	// trim on an image that already has no margin is skipped
 	full := pixOf(t, 2, 2, func(x, y int) color.NRGBA { return color.NRGBA{1, 2, 3, 255} })
 	res, err := a.ProcessPixels(JobRequest{Command: "trim"}, 2, 2, full)
 	if err != nil || !res.Skipped || res.Message == "" || res.Pixels != "" {
-		t.Errorf("Skip 처리가 다릅니다: %+v, %v", res, err)
+		t.Errorf("Skip handling differs: %+v, %v", res, err)
 	}
-	// 완전히 투명한 이미지도 건너뜀
+	// A fully transparent image is skipped too
 	empty := b64(make([]byte, 2*2*4))
 	if res, err := a.ProcessPixels(JobRequest{Command: "trim"}, 2, 2, empty); err != nil || !res.Skipped {
-		t.Errorf("투명 이미지: %+v, %v", res, err)
+		t.Errorf("transparent image: %+v, %v", res, err)
 	}
-	// 여백 자르기
+	// Trimming the margin
 	pad := pixOf(t, 4, 4, func(x, y int) color.NRGBA {
 		if x == 1 && y == 2 {
 			return color.NRGBA{9, 9, 9, 255}
@@ -335,15 +335,15 @@ func TestProcessPixelsSkipAndErrors(t *testing.T) {
 	}
 
 	for name, call := range map[string]func() error{
-		"허용되지 않는 명령": func() error { _, e := a.ProcessPixels(JobRequest{Command: "slice"}, 2, 2, full); return e },
-		"알 수 없는 명령":  func() error { _, e := a.ProcessPixels(JobRequest{Command: "nope"}, 2, 2, full); return e },
-		"잘못된 크기":     func() error { _, e := a.ProcessPixels(JobRequest{Command: "trim"}, 0, 2, full); return e },
-		"픽셀 길이 불일치":  func() error { _, e := a.ProcessPixels(JobRequest{Command: "trim"}, 3, 2, full); return e },
-		"잘못된 base64": func() error { _, e := a.ProcessPixels(JobRequest{Command: "trim"}, 2, 2, "!!"); return e },
-		"잘못된 배율":     func() error { _, e := a.ProcessPixels(JobRequest{Command: "upscale", Scale: 1}, 2, 2, full); return e },
+		"disallowed command":    func() error { _, e := a.ProcessPixels(JobRequest{Command: "slice"}, 2, 2, full); return e },
+		"unknown command":       func() error { _, e := a.ProcessPixels(JobRequest{Command: "nope"}, 2, 2, full); return e },
+		"invalid size":          func() error { _, e := a.ProcessPixels(JobRequest{Command: "trim"}, 0, 2, full); return e },
+		"pixel length mismatch": func() error { _, e := a.ProcessPixels(JobRequest{Command: "trim"}, 3, 2, full); return e },
+		"invalid base64":        func() error { _, e := a.ProcessPixels(JobRequest{Command: "trim"}, 2, 2, "!!"); return e },
+		"invalid scale":         func() error { _, e := a.ProcessPixels(JobRequest{Command: "upscale", Scale: 1}, 2, 2, full); return e },
 	} {
 		if err := call(); err == nil {
-			t.Errorf("%s: 오류가 나야 합니다", name)
+			t.Errorf("%s: should be an error", name)
 		}
 	}
 }
@@ -378,20 +378,20 @@ func TestPaletteStrip(t *testing.T) {
 	}
 	n := common.ToNRGBA(img)
 	if n.Rect.Dx() != 3 || n.Rect.Dy() != 1 {
-		t.Fatalf("크기 = %v", n.Rect)
+		t.Fatalf("size = %v", n.Rect)
 	}
 	want := []byte{255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255}
 	if !bytes.Equal(n.Pix, want) {
-		t.Errorf("픽셀 = %v, want %v", n.Pix, want)
+		t.Errorf("pixels = %v, want %v", n.Pix, want)
 	}
 	if _, err := paletteStrip(nil); err == nil {
-		t.Error("빈 목록은 오류여야 합니다")
+		t.Error("an empty list should be an error")
 	}
 	if _, err := paletteStrip([]string{"#12"}); err == nil {
-		t.Error("잘못된 색은 오류여야 합니다")
+		t.Error("an invalid color should be an error")
 	}
 	if _, err := paletteStrip(make([]string, 257)); err == nil {
-		t.Error("257색은 오류여야 합니다")
+		t.Error("257 colors should be an error")
 	}
 }
 
@@ -403,34 +403,34 @@ func TestSavePaletteColorsRefusesExisting(t *testing.T) {
 	a := NewApp()
 	cols := []string{"#102030", "#405060"}
 	if ok, err := a.PaletteExists("my-pal"); err != nil || ok {
-		t.Fatalf("처음에는 없어야 합니다: %v %v", ok, err)
+		t.Fatalf("should not exist at first: %v %v", ok, err)
 	}
 	info, err := a.SavePaletteColors("My-Pal", cols, false)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if info.Name != "my-pal" || len(info.Colors) != 2 || info.Colors[0] != "#102030" {
-		t.Errorf("저장 결과 = %+v", info)
+		t.Errorf("save result = %+v", info)
 	}
 	if ok, _ := a.PaletteExists("my-pal"); !ok {
-		t.Error("저장 후에는 있어야 합니다")
+		t.Error("should exist after saving")
 	}
 	if _, err := a.SavePaletteColors("my-pal", cols[:1], false); err == nil {
-		t.Error("같은 이름은 거부해야 합니다")
+		t.Error("the same name should be rejected")
 	}
 	info, err = a.SavePaletteColors("my-pal", cols[:1], true)
 	if err != nil || len(info.Colors) != 1 {
-		t.Errorf("덮어쓰기 = %+v, %v", info, err)
+		t.Errorf("overwrite = %+v, %v", info, err)
 	}
 	if _, err := a.SavePaletteColors("Bad Name", cols, false); err == nil {
-		t.Error("잘못된 이름은 거부해야 합니다")
+		t.Error("an invalid name should be rejected")
 	}
 }
 
 func TestProcessPixelsDespeckle(t *testing.T) {
 	a := NewApp()
 	src := pixOf(t, 6, 4, func(x, y int) color.NRGBA {
-		if x < 3 && y < 3 || (x == 5 && y == 3) { // 3x3 덩어리 + 외톨이 1픽셀
+		if x < 3 && y < 3 || (x == 5 && y == 3) { // a 3x3 blob + 1 isolated pixel
 			return color.NRGBA{9, 9, 9, 255}
 		}
 		return color.NRGBA{}
@@ -441,13 +441,13 @@ func TestProcessPixelsDespeckle(t *testing.T) {
 	}
 	got := decodeB64(t, res.Pixels)
 	if got[(3*6+5)*4+3] != 0 || got[(1*6+1)*4+3] != 255 {
-		t.Error("외톨이만 지워져야 합니다")
+		t.Error("only the isolated pixel should be removed")
 	}
 	if res, err := a.ProcessPixels(JobRequest{Command: "despeckle", MinSize: 3, Diagonal: true}, 6, 4, res.Pixels); err != nil || !res.Skipped {
-		t.Errorf("지울 것이 없으면 건너뜀이어야 합니다: %+v, %v", res, err)
+		t.Errorf("with nothing to remove it should be skipped: %+v, %v", res, err)
 	}
 	if _, err := a.ProcessPixels(JobRequest{Command: "despeckle", MinSize: 0}, 6, 4, src); err == nil {
-		t.Error("MinSize 0 은 오류여야 합니다")
+		t.Error("MinSize 0 should be an error")
 	}
 }
 
@@ -455,17 +455,17 @@ func TestEditorDirtyCount(t *testing.T) {
 	a := NewApp()
 	a.SetEditorDirtyCount(3)
 	if a.editorDirty.Load() != 3 {
-		t.Error("문서 수가 저장되지 않음")
+		t.Error("document count was not stored")
 	}
 	a.SetEditorDirty(false)
 	if a.editorDirty.Load() != 0 {
-		t.Error("SetEditorDirty(false) 는 0 이어야 함")
+		t.Error("SetEditorDirty(false) should be 0")
 	}
 	a.SetEditorDirty(true)
 	if a.editorDirty.Load() != 1 {
-		t.Error("SetEditorDirty(true) 는 1 이어야 함")
+		t.Error("SetEditorDirty(true) should be 1")
 	}
 	if !strings.Contains(dirtyMessage(3), "3개") {
-		t.Errorf("문구: %q", dirtyMessage(3))
+		t.Errorf("message: %q", dirtyMessage(3))
 	}
 }

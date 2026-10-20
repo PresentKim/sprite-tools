@@ -8,14 +8,14 @@ import (
 	"sprite-tools/pkg/i18n"
 )
 
-// reduceData: reduce 에 필요한 색상 목록과 픽셀별 색상 번호입니다.
-// 색상 수집/정렬/OKLab 변환은 한 번만 하고, 군집화(cluster)만 기준값마다 반복할 수 있습니다.
+// reduceData holds the color list and per-pixel color indices that reduce needs.
+// Color collection, sorting and OKLab conversion happen only once; only the clustering (cluster) can be repeated per threshold.
 type reduceData struct {
 	bounds         image.Rectangle
-	pixEntry       []int32 // 픽셀별 색상 번호, 완전 투명이면 -1
+	pixEntry       []int32 // color index per pixel, -1 if fully transparent
 	keys           []uint32
 	labs           []common.OKLab
-	order          []int // 많이 쓰인 색상 순서(동률이면 먼저 등장한 순서)
+	order          []int // colors ordered by usage (ties broken by first appearance)
 	hasTransparent bool
 }
 
@@ -62,8 +62,8 @@ func newReduceData(src image.Image) *reduceData {
 	return d
 }
 
-// cluster: 많이 쓰인 색상부터 대표로 삼아, 기준값 미만으로 가까운 색상을 대표에 합칩니다.
-// 색상 번호별 대표 색상 번호와 대표 개수를 반환합니다.
+// cluster takes the most-used colors as representatives and merges colors closer than the threshold into them.
+// It returns the representative color index and the representative count for each color index.
 func (d *reduceData) cluster(threshold float64) (repOf []int, repCount int) {
 	repOf = make([]int, len(d.keys))
 	var repLabs []common.OKLab
@@ -87,7 +87,7 @@ func (d *reduceData) cluster(threshold float64) (repOf []int, repCount int) {
 	return repOf, len(repLabs)
 }
 
-// apply: 군집화 결과대로 색상을 바꾼 이미지를 만듭니다. 완전 투명 픽셀은 (0,0,0,0) 그대로입니다.
+// apply builds the image with colors replaced according to the clustering result. Fully transparent pixels stay (0,0,0,0).
 func (d *reduceData) apply(repOf []int) *image.NRGBA {
 	dst := image.NewNRGBA(d.bounds)
 	colors := make([][4]uint8, len(d.keys))
@@ -103,9 +103,9 @@ func (d *reduceData) apply(repOf []int) *image.NRGBA {
 	return dst
 }
 
-// ReduceImage: 비슷한 색상(OKLab 가중 거리 < threshold)을 하나의 대표 색상으로 합칩니다.
-// 많이 쓰인 색상부터 대표로 선택하므로 결과가 픽셀 순서에 좌우되지 않습니다.
-// 합칠 색상이 없으면 Skip 에러를 반환합니다.
+// ReduceImage merges similar colors (OKLab weighted distance < threshold) into a single representative color.
+// It picks representatives starting from the most-used colors, so the result does not depend on pixel order.
+// If there are no colors to merge, it returns a Skip error.
 func ReduceImage(src image.Image, threshold float64) (image.Image, string, error) {
 	d := newReduceData(src)
 	repOf, repCount := d.cluster(threshold)
@@ -121,8 +121,8 @@ func ReduceImage(src image.Image, threshold float64) (image.Image, string, error
 	return d.apply(repOf), i18n.T("msg.reduce.result", origCount, finalCount), nil
 }
 
-// ReduceToCount: 불투명 색상이 maxColors 개 이하가 되는 가장 작은 기준값을 이분 탐색으로 찾아 ReduceImage 와 같은 방식으로 합칩니다.
-// 이미 maxColors 개 이하면 Skip 에러를 반환합니다.
+// ReduceToCount binary-searches for the smallest threshold that leaves at most maxColors opaque colors, then merges the same way as ReduceImage.
+// If there are already maxColors or fewer, it returns a Skip error.
 func ReduceToCount(src image.Image, maxColors int) (image.Image, string, error) {
 	if maxColors < 1 {
 		return nil, "", i18n.Errorf("err.reduce.max_colors", maxColors)
@@ -133,7 +133,7 @@ func ReduceToCount(src image.Image, maxColors int) (image.Image, string, error) 
 		return nil, "", common.Skip("skip.reduce.already", orig, maxColors)
 	}
 
-	// 상한에서도 목표를 못 맞추면 기준값을 크게 늘려 한 번 더 시도합니다.
+	// If the target is still missed at the upper bound, increase the threshold substantially and try once more.
 	lo, hi := 0.001, 1.5
 	if _, n := d.cluster(hi); n > maxColors {
 		hi = 8.0
@@ -153,21 +153,21 @@ func ReduceToCount(src image.Image, maxColors int) (image.Image, string, error) 
 	return d.apply(repOf), i18n.T("msg.reduce.result_max", orig, repCount, hi), nil
 }
 
-// ReduceMax: 파일 단위 ReduceToCount.
+// ReduceMax is the file-level ReduceToCount.
 func ReduceMax(inputPath, outputPath string, maxColors int) (string, error) {
 	return convertFile(inputPath, outputPath, func(src image.Image) (image.Image, string, error) {
 		return ReduceToCount(src, maxColors)
 	})
 }
 
-// Reduce: 파일 단위 ReduceImage.
+// Reduce is the file-level ReduceImage.
 func Reduce(inputPath, outputPath string, threshold float64) (string, error) {
 	return convertFile(inputPath, outputPath, func(src image.Image) (image.Image, string, error) {
 		return ReduceImage(src, threshold)
 	})
 }
 
-// convertFile: PNG 를 읽어 변환한 뒤 저장하는 공통 처리입니다.
+// convertFile is the common routine that reads a PNG, converts it and saves it.
 func convertFile(inputPath, outputPath string, fn func(image.Image) (image.Image, string, error)) (string, error) {
 	src, err := common.LoadPNG(inputPath)
 	if err != nil {

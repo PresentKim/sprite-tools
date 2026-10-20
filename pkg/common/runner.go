@@ -15,15 +15,15 @@ import (
 	"sprite-tools/pkg/i18n"
 )
 
-// Task: 입력 파일 하나를 처리하고 결과 요약 메시지를 반환합니다.
-// 처리할 필요가 없는 경우 Skip(...) 으로 만든 에러를 반환합니다.
+// Task processes one input file and returns a result summary message.
+// When there is nothing to process, return an error made with Skip(...).
 type Task func(inputPath, outputPath string) (string, error)
 
 type skipError struct{ msg string }
 
 func (e skipError) Error() string { return e.msg }
 
-// Skip: 실패가 아닌 "건너뜀"으로 집계될 에러를 만듭니다. key 는 i18n 카탈로그(skip.*)의 키이고, 메시지는 만들어질 때의 언어로 고정됩니다.
+// Skip makes an error that is counted as "skipped" rather than a failure. key is a key in the i18n catalog (skip.*), and the message is fixed to the language active when it was created.
 func Skip(key string, a ...any) error {
 	return skipError{i18n.T(key, a...)}
 }
@@ -34,26 +34,26 @@ func IsSkip(err error) bool {
 }
 
 type Options struct {
-	Roots       []string // 처리할 파일 또는 디렉터리 (비어 있으면 ".")
-	Pattern     string   // 디렉터리 탐색 시 파일 이름 패턴 (대소문자 무시)
-	Recursive   bool     // 하위 디렉터리까지 탐색
-	Suffix      string   // 출력 파일 접미사 (InPlace 가 아닐 때)
-	InPlace     bool     // 원본 파일을 직접 덮어씀
-	OutDir      string   // 비어 있지 않으면 결과를 이 폴더에 저장 (루트 기준 상대 경로 유지, InPlace 와 함께 쓸 수 없음)
-	NoOutput    bool     // 작업이 출력 경로를 직접 결정함 (slice 등)
+	Roots       []string // files or directories to process (".", if empty)
+	Pattern     string   // file name pattern when walking directories (case-insensitive)
+	Recursive   bool     // also walk subdirectories
+	Suffix      string   // output file suffix (when not InPlace)
+	InPlace     bool     // overwrite the original file directly
+	OutDir      string   // if non-empty, save results in this folder (keeping paths relative to the root; cannot be combined with InPlace)
+	NoOutput    bool     // the task decides its own output paths (slice, etc.)
 	Threads     int
-	ExcludeDirs []string // 탐색에서 제외할 디렉터리
-	Backup      bool     // InPlace 일 때, 덮어쓰기 전에 원본을 <파일 폴더>/BackupDirName/<실행 시각>/ 에 복사
+	ExcludeDirs []string // directories to exclude from the walk
+	Backup      bool     // with InPlace, copy the original to <file folder>/BackupDirName/<run time>/ before overwriting
 }
 
-// BackupDirName: 덮어쓰기 전 원본을 보관하는 숨김 폴더 이름입니다. 점으로 시작하므로 폴더 탐색에서 건너뜁니다.
+// BackupDirName is the name of the hidden folder that holds originals before they are overwritten. It starts with a dot, so directory walks skip it.
 const BackupDirName = ".sprite-tools-backup"
 
-// backupStampLayout: 한 번 실행에 하나씩 붙는 백업 하위 폴더 이름의 형식입니다.
+// backupStampLayout is the format of the backup subfolder name, one per run.
 const backupStampLayout = "20060102-150405"
 
-// Input: 수집된 입력 파일 하나와, 그 파일을 찾은 루트 폴더입니다.
-// 파일을 직접 지정했다면 Root 는 비어 있습니다.
+// Input is one collected input file and the root folder it was found in.
+// Root is empty if the file was given directly.
 type Input struct {
 	Path string
 	Root string
@@ -67,16 +67,16 @@ const (
 	StatusFailed  Status = "failed"
 )
 
-// Result: 파일 하나의 처리 결과입니다.
+// Result is the processing result for one file.
 type Result struct {
-	Index     int    `json:"index"`     // 입력 목록에서의 위치
-	Completed int    `json:"completed"` // 지금까지 끝난 파일 수
+	Index     int    `json:"index"`     // position in the input list
+	Completed int    `json:"completed"` // number of files finished so far
 	Total     int    `json:"total"`
 	Input     string `json:"input"`
 	Output    string `json:"output"`
 	Status    Status `json:"status"`
 	Message   string `json:"message"`
-	Backup    string `json:"backup,omitempty"` // 덮어쓰기 전에 복사해 둔 원본 경로 (백업했을 때만)
+	Backup    string `json:"backup,omitempty"` // path of the original copied before overwriting (only when backed up)
 }
 
 type Summary struct {
@@ -85,18 +85,18 @@ type Summary struct {
 	Failed     int           `json:"failed"`
 	Canceled   bool          `json:"canceled"`
 	Elapsed    time.Duration `json:"elapsed"`
-	Backups    int           `json:"backups"`    // 실제로 남은 백업 파일 수
-	BackupDirs []string      `json:"backupDirs"` // 백업이 저장된 폴더들 (정렬됨)
+	Backups    int           `json:"backups"`    // number of backup files actually left
+	BackupDirs []string      `json:"backupDirs"` // folders where backups were saved (sorted)
 }
 
-// OutputPath: 옵션에 따른 출력 경로를 계산합니다. 루트를 모르는(직접 지정한) 파일로 취급합니다.
+// OutputPath computes the output path for the options. The file is treated as one whose root is unknown (given directly).
 func (o Options) OutputPath(in string) string {
 	return o.OutputFor(Input{Path: in})
 }
 
-// OutputFor: 입력 파일의 출력 경로를 계산합니다.
-// OutDir 가 있으면 루트 기준 상대 경로를 유지한 채 OutDir 아래에 두고(직접 지정한 파일은 OutDir 바로 아래),
-// 없으면 원본 옆에 접미사를 붙입니다.
+// OutputFor computes the output path of an input file.
+// With OutDir, the path relative to the root is kept under OutDir (a directly given file goes right under OutDir);
+// otherwise the suffix is appended next to the original.
 func (o Options) OutputFor(in Input) string {
 	if o.NoOutput {
 		return ""
@@ -121,8 +121,8 @@ func (o Options) OutputFor(in Input) string {
 	return rel
 }
 
-// Validate: 출력 설정이 올바른지 확인합니다.
-// 출력 폴더(OutDir)를 쓰면 접미사가 비어 있어도 되지만, 출력이 원본과 같은 경로가 되는 파일은 실행 시 실패로 처리됩니다.
+// Validate checks that the output settings are valid.
+// With an output folder (OutDir) the suffix may be empty, but files whose output would equal the original path fail at run time.
 func (o Options) Validate() error {
 	if o.InPlace && o.OutDir != "" {
 		return i18n.Errorf("err.options.inplace_outdir")
@@ -136,7 +136,7 @@ func (o Options) Validate() error {
 	return nil
 }
 
-// SamePath: 두 경로가 같은 파일을 가리키는지(대소문자 무시) 확인합니다.
+// SamePath reports whether two paths point to the same file (case-insensitive).
 func SamePath(a, b string) bool {
 	aa, err1 := filepath.Abs(a)
 	bb, err2 := filepath.Abs(b)
@@ -146,14 +146,14 @@ func SamePath(a, b string) bool {
 	return strings.EqualFold(aa, bb)
 }
 
-// Plan: 입력 하나의 출력 계획입니다. Err 가 있으면 이 파일은 처리하지 않습니다.
+// Plan is the output plan for one input. If Err is set, this file is not processed.
 type Plan struct {
 	Output string
 	Err    error
 }
 
-// PlanOutputs: 모든 입력의 출력 경로를 계산하고, 원본을 덮어쓰게 되거나 다른 입력과 출력이 겹치는 파일에는 Err 를 채웁니다.
-// 덮어쓰기(InPlace)는 의도된 동작이므로 검사하지 않습니다.
+// PlanOutputs computes the output paths of all inputs and fills Err for files that would overwrite the original or whose output collides with another input.
+// Overwriting (InPlace) is intended, so it is not checked.
 func (o Options) PlanOutputs(inputs []Input) []Plan {
 	plans := make([]Plan, len(inputs))
 	claimed := make(map[string]int)
@@ -190,7 +190,7 @@ func (o Options) isOwnOutput(path string) bool {
 	return strings.HasSuffix(strings.ToLower(stem), strings.ToLower(o.Suffix))
 }
 
-// CollectFiles: 옵션에 맞는 입력 파일 경로 목록을 정렬된 상태로 반환합니다.
+// CollectFiles returns the list of input file paths matching the options, sorted.
 func CollectFiles(o Options) ([]string, error) {
 	inputs, err := CollectInputs(o)
 	if err != nil {
@@ -203,8 +203,8 @@ func CollectFiles(o Options) ([]string, error) {
 	return files, nil
 }
 
-// CollectInputs: CollectFiles 와 같지만 각 파일을 찾은 루트도 함께 반환합니다(출력 폴더에서 상대 경로를 유지하는 데 필요).
-// OutDir 안쪽은 탐색하지 않으므로 이전 출력이 다시 입력으로 들어오지 않습니다.
+// CollectInputs is like CollectFiles but also returns the root each file was found in (needed to keep relative paths in the output folder).
+// OutDir is not walked, so earlier outputs are not fed back in as inputs.
 func CollectInputs(o Options) ([]Input, error) {
 	roots := o.Roots
 	if len(roots) == 0 {
@@ -257,7 +257,7 @@ func CollectInputs(o Options) ([]Input, error) {
 			return nil, i18n.Errorf("err.path.not_found", root)
 		}
 		if !info.IsDir() {
-			// 직접 지정한 파일은 패턴과 관계없이 처리합니다.
+			// Directly given files are processed regardless of the pattern.
 			add(root, "")
 			continue
 		}
@@ -291,7 +291,7 @@ func CollectInputs(o Options) ([]Input, error) {
 	return files, nil
 }
 
-// RunFiles: 루트를 모르는 파일 경로들을 RunInputs 로 처리합니다.
+// RunFiles processes file paths with unknown roots via RunInputs.
 func RunFiles(ctx context.Context, files []string, o Options, task Task, report func(Result)) Summary {
 	inputs := make([]Input, len(files))
 	for i, f := range files {
@@ -300,14 +300,14 @@ func RunFiles(ctx context.Context, files []string, o Options, task Task, report 
 	return RunInputs(ctx, inputs, o, task, report)
 }
 
-// RunInputs: 주어진 파일들을 병렬로 처리합니다. report 는 파일 하나가 끝날 때마다 (순서대로 하나씩) 호출됩니다.
-// ctx 가 취소되면 아직 시작하지 않은 파일은 처리하지 않습니다.
-// 출력 폴더가 있으면 작업 전에 필요한 하위 폴더를 만들고, 출력이 원본/다른 출력과 겹치는 파일은 실패로 처리합니다.
+// RunInputs processes the given files in parallel. report is called once per finished file (one at a time, in order).
+// Once ctx is canceled, files that have not started yet are not processed.
+// With an output folder, the needed subfolders are created before work starts, and files whose output collides with the original or other outputs are treated as failures.
 func RunInputs(ctx context.Context, files []Input, o Options, task Task, report func(Result)) Summary {
 	var sum Summary
 	plans := o.PlanOutputs(files)
 	start := time.Now()
-	stamp := start.Format(backupStampLayout) // 한 번 실행의 백업은 모두 같은 시각 폴더에 둡니다.
+	stamp := start.Format(backupStampLayout) // all backups of one run go into the same timestamp folder
 
 	threads := o.Threads
 	if threads <= 0 {
@@ -330,7 +330,7 @@ func RunInputs(ctx context.Context, files []Input, o Options, task Task, report 
 				if err == nil && o.OutDir != "" && out != "" {
 					err = os.MkdirAll(filepath.Dir(out), 0o755)
 				}
-				// 원본을 먼저 복사해 두고, 작업이 실제로 끝나지 않았다면(건너뜀·실패) 복사본을 지웁니다.
+				// Copy the original first, and delete the copy if the task did not actually finish (skipped or failed).
 				var backup string
 				if err == nil && o.Backup && o.InPlace && out != "" {
 					backup, err = backupFile(in, stamp)
@@ -395,8 +395,8 @@ feed:
 	return sum
 }
 
-// backupFile: 원본을 <폴더>/BackupDirName/<stamp>/<이름> 으로 복사하고 그 경로를 반환합니다.
-// 원본이 없으면 복사할 것이 없으므로 빈 경로를 돌려주고, 이후 작업이 스스로 실패하도록 둡니다.
+// backupFile copies the original to <folder>/BackupDirName/<stamp>/<name> and returns that path.
+// If the original does not exist there is nothing to copy, so it returns an empty path and lets the task fail on its own.
 func backupFile(in, stamp string) (string, error) {
 	data, err := os.ReadFile(in)
 	if errors.Is(err, fs.ErrNotExist) {
@@ -416,8 +416,8 @@ func backupFile(in, stamp string) (string, error) {
 	return dst, nil
 }
 
-// finishBackupDirs: 실행이 끝난 뒤 비어 있는 백업 폴더를 정리하고, 백업이 남은 폴더 목록을 반환합니다.
-// 실행 중에 지우면 다른 스레드가 쓰려는 폴더를 없앨 수 있으므로 모두 끝난 뒤에 합니다.
+// finishBackupDirs cleans up empty backup folders after the run ends and returns the folders that still hold backups.
+// Doing this during the run could remove a folder another thread is about to write to, so it waits until everything is done.
 func finishBackupDirs(files []Input, stamp string) []string {
 	seen := make(map[string]bool)
 	var kept []string
@@ -428,22 +428,22 @@ func finishBackupDirs(files []Input, stamp string) []string {
 			continue
 		}
 		seen[dir] = true
-		if err := os.Remove(dir); err != nil { // 비어 있을 때만 지워짐
+		if err := os.Remove(dir); err != nil { // removed only when empty
 			if _, statErr := os.Stat(dir); statErr == nil {
 				kept = append(kept, dir)
 			}
 			continue
 		}
-		os.Remove(root) // 다른 백업이 없을 때만 지워짐
+		os.Remove(root) // removed only when there are no other backups
 	}
 	slices.Sort(kept)
 	return kept
 }
 
-// RestoreBackup: 백업해 둔 원본을 원래 위치(dest)로 되돌립니다. 백업 파일은 그대로 남깁니다.
-// BackupDirName 폴더 안의 파일만 복원 대상으로 인정합니다.
+// RestoreBackup puts a backed-up original back at its original location (dest). The backup file is left in place.
+// Only files inside the BackupDirName folder are accepted for restore.
 func RestoreBackup(backup, dest string) error {
-	// 백업은 <폴더>/.sprite-tools-backup/<시각>/<이름> 에 있으므로, <폴더>/<이름> 으로만 복원을 허용합니다.
+	// Backups live at <folder>/.sprite-tools-backup/<time>/<name>, so restore is allowed only to <folder>/<name>.
 	backup, dest = filepath.Clean(backup), filepath.Clean(dest)
 	runDir := filepath.Dir(backup)
 	backupRoot := filepath.Dir(runDir)
@@ -462,7 +462,7 @@ func RestoreBackup(backup, dest string) error {
 	return nil
 }
 
-// runTask: 작업 중 panic 이 발생해도 전체 실행이 중단되지 않도록 보호합니다.
+// runTask guards against a panic in a task so it does not abort the whole run.
 func runTask(task Task, in, out string) (msg string, err error) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -472,8 +472,8 @@ func runTask(task Task, in, out string) (msg string, err error) {
 	return task(in, out)
 }
 
-// BackupFileNow: 파일 하나를 현재 시각 이름의 백업 폴더(<폴더>/BackupDirName/<시각>/<이름>)로 복사하고 그 경로를 반환합니다.
-// 원본이 없으면 복사할 것이 없으므로 빈 경로와 nil 을 돌려줍니다.
+// BackupFileNow copies one file into a backup folder named for the current time (<folder>/BackupDirName/<time>/<name>) and returns that path.
+// If the original does not exist there is nothing to copy, so it returns an empty path and nil.
 func BackupFileNow(path string) (string, error) {
 	return backupFile(path, time.Now().Format(backupStampLayout))
 }

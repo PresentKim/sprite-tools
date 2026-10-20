@@ -11,13 +11,13 @@ import (
 	"sprite-tools/pkg/i18n"
 )
 
-// MaxExtractColors: 추출할 수 있는 최대 색상 수 (Lospec 팔레트 PNG 관례).
+// MaxExtractColors is the maximum number of colors that can be extracted (Lospec palette PNG convention).
 const MaxExtractColors = 256
 
-// ExtractPaletteImage: 이미지에 쓰인 색상을 Lospec 스타일 팔레트 PNG(색 1개 = 1px, 한 줄)로 만듭니다.
-// 완전 투명한 픽셀은 무시하고, 나머지는 알파를 255로 맞춘 뒤 같은 색을 합칩니다.
-// 많이 쓰인 색상 순서이며 동률이면 먼저 등장한 색이 앞섭니다.
-// 색상이 256개를 넘으면 에러, 색상이 없으면 Skip 에러를 반환합니다.
+// ExtractPaletteImage builds a Lospec-style palette PNG (one color = 1px, a single row) from the colors used in an image.
+// Fully transparent pixels are ignored; the rest are set to alpha 255 and identical colors are merged.
+// Colors are ordered by how often they are used, and ties go to the color that appeared first.
+// More than 256 colors is an error; no colors returns a Skip error.
 func ExtractPaletteImage(src image.Image) (image.Image, string, error) {
 	n := common.ToNRGBA(src)
 	index := make(map[uint32]int)
@@ -66,7 +66,7 @@ func ExtractPaletteImage(src image.Image) (image.Image, string, error) {
 	return dst, i18n.T("msg.extract.result", len(keys)), nil
 }
 
-// NormalizePaletteName: 팔레트 이름을 소문자로 바꾸고 Lospec 이름 규칙(영문 소문자, 숫자, '-')을 검사합니다.
+// NormalizePaletteName lowercases a palette name and validates it against the Lospec naming rule (lowercase letters, digits, hyphen).
 func NormalizePaletteName(name string) (string, error) {
 	clean := strings.ToLower(strings.TrimSpace(name))
 	if !paletteNamePattern.MatchString(clean) {
@@ -75,8 +75,8 @@ func NormalizePaletteName(name string) (string, error) {
 	return clean, nil
 }
 
-// SavePalette: 팔레트 PNG 를 공용 팔레트 폴더에 이름으로 저장해 recolor -p <이름> 에서 쓸 수 있게 합니다.
-// 같은 이름의 팔레트가 이미 있으면(실행 파일 옆 palettes 폴더 포함) force 가 아닌 한 거부합니다.
+// SavePalette saves a palette PNG by name in the shared palette folder so it can be used as recolor -p <name>.
+// If a palette with the same name already exists (including the palettes folder next to the executable), it is rejected unless force is set.
 func SavePalette(name string, palette image.Image, force bool) (string, error) {
 	clean, err := NormalizePaletteName(name)
 	if err != nil {
@@ -100,7 +100,7 @@ func SavePalette(name string, palette image.Image, force bool) (string, error) {
 	return path, nil
 }
 
-// Extract: 파일 단위 ExtractPaletteImage. saveName 이 있으면 공용 팔레트 폴더에도 저장합니다.
+// Extract is the file-level ExtractPaletteImage. If saveName is set, it also saves to the shared palette folder.
 func Extract(inputPath, outputPath, saveName string, force bool) (string, error) {
 	if saveName != "" {
 		if _, err := NormalizePaletteName(saveName); err != nil {
@@ -116,7 +116,7 @@ func Extract(inputPath, outputPath, saveName string, force bool) (string, error)
 		return "", err
 	}
 	if saveName != "" {
-		// 이름 충돌을 먼저 확인해, 실패해도 출력 파일이 남지 않게 합니다.
+		// Check for a name collision first, so no output file is left behind on failure.
 		saved, err := SavePalette(saveName, pal, force)
 		if err != nil {
 			return "", err

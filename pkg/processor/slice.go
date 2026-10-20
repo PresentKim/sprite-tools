@@ -11,7 +11,7 @@ import (
 	"sprite-tools/pkg/i18n"
 )
 
-// isFrameEmpty: rect 영역(img 좌표계)의 알파가 모두 0 인지 확인합니다.
+// isFrameEmpty reports whether the alpha of the rect area (in img coordinates) is all 0.
 func isFrameEmpty(img *image.NRGBA, rect image.Rectangle) bool {
 	for y := rect.Min.Y; y < rect.Max.Y; y++ {
 		row := img.Pix[img.PixOffset(rect.Min.X, y):img.PixOffset(rect.Max.X, y)]
@@ -24,7 +24,7 @@ func isFrameEmpty(img *image.NRGBA, rect image.Rectangle) bool {
 	return true
 }
 
-// copyFrame: rect 영역을 (0,0) 에서 시작하는 새 NRGBA 로 복사합니다.
+// copyFrame copies the rect area into a new NRGBA that starts at (0,0).
 func copyFrame(img *image.NRGBA, rect image.Rectangle) *image.NRGBA {
 	dst := image.NewNRGBA(image.Rect(0, 0, rect.Dx(), rect.Dy()))
 	for y := 0; y < rect.Dy(); y++ {
@@ -34,13 +34,13 @@ func copyFrame(img *image.NRGBA, rect image.Rectangle) *image.NRGBA {
 	return dst
 }
 
-// Frame: 잘라낸 프레임 하나와 시트에서의 위치입니다.
+// Frame is one cut-out frame and its position in the sheet.
 type Frame struct {
 	Image    *image.NRGBA
 	Col, Row int
 }
 
-// SliceImage: 스프라이트 시트를 frameW x frameH 크기로 자릅니다. keepEmpty 가 false 면 완전히 투명한 프레임은 제외합니다.
+// SliceImage cuts a sprite sheet into frameW x frameH frames. If keepEmpty is false, fully transparent frames are excluded.
 func SliceImage(src image.Image, frameW, frameH int, keepEmpty bool) ([]Frame, string, error) {
 	bounds := src.Bounds()
 	if bounds.Dx() == frameW && bounds.Dy() == frameH {
@@ -75,15 +75,15 @@ func SliceImage(src image.Image, frameW, frameH int, keepEmpty bool) ([]Frame, s
 	return frames, msg, nil
 }
 
-// SliceFile: 스프라이트 시트를 잘라 "<이름>-0001.png" 형태로 저장합니다.
-// outDir 가 비어 있으면 원본과 같은 폴더에 저장합니다.
+// SliceFile cuts a sprite sheet and saves the frames as "<name>-0001.png".
+// If outDir is empty, they are saved in the same folder as the original.
 func SliceFile(path string, frameW, frameH int, outDir string, keepEmpty bool) (string, error) {
 	msg, _, err := SliceFilePaths(path, frameW, frameH, outDir, keepEmpty)
 	return msg, err
 }
 
-// SliceFilePaths: SliceFile 과 같지만 저장한 프레임 파일 경로 목록도 함께 반환합니다
-// (중간에 실패하면 그때까지 저장한 경로를 돌려줍니다).
+// SliceFilePaths is like SliceFile but also returns the list of saved frame file paths
+// (on a mid-way failure it returns the paths saved so far).
 func SliceFilePaths(path string, frameW, frameH int, outDir string, keepEmpty bool) (string, []string, error) {
 	src, err := common.LoadPNG(path)
 	if err != nil {

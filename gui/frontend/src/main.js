@@ -42,7 +42,7 @@ const el = (tag, cls, text) => {
   return e;
 };
 
-// ---------- 상태 ----------
+// ---------- State ----------
 
 const defaults = {
   command: 'reduce',
@@ -51,24 +51,24 @@ const defaults = {
   maxColors: 16,
   frameSize: '16',
   keepEmpty: false,
-  outDir: '', // 프레임 자르기의 프레임 저장 폴더
+  outDir: '', // folder to save frames to for frame slicing
   scale: 0,
   upscale: 2,
   pad: 0,
-  minSize: 4, // 조각 지우기: 이보다 작은 조각을 지움
-  diagonal: true, // 조각 지우기: 대각선도 이어진 것으로 봄
+  minSize: 4, // despeckle: erase pieces smaller than this
+  diagonal: true, // despeckle: treat diagonal neighbors as connected
   packCols: 0,
   packGap: 0,
   packAlign: 'topleft', // topleft | center
   palette: '',
   outMode: 'suffix', // suffix | dir | inplace
-  exportDir: '', // 다른 폴더에 저장할 때의 폴더
-  backup: true, // 원본 덮어쓰기 전에 백업
+  exportDir: '', // folder when saving to a different folder
+  backup: true, // back up the original before overwriting
   suffixes: {},
   threads: 0,
   recursive: true,
   zoom: 'fit',
-  mode: 'batch', // batch | editor — 마지막으로 쓴 모드
+  mode: 'batch', // batch | editor - the mode used last
 };
 const settings = loadSettings();
 const state = {
@@ -76,9 +76,9 @@ const state = {
   selected: null,
   running: false,
   palettes: [],
-  filter: '', // 파일 이름 필터 (소문자)
-  onlyShown: false, // 필터가 켜져 있을 때 보이는 파일만 실행
-  backups: [], // 마지막 덮어쓰기 실행에서 만든 백업 {path, backup}
+  filter: '', // file name filter (lowercase)
+  onlyShown: false, // when a filter is on, run only the visible files
+  backups: [], // backups made by the last overwrite run {path, backup}
   backupDirs: [],
 };
 
@@ -86,7 +86,7 @@ function loadSettings() {
   try {
     const stored = JSON.parse(localStorage.getItem('sprite-tools') || '{}');
     const s = { ...defaults, ...stored };
-    // 예전 설정(inPlace 불리언)을 저장 방식으로 옮깁니다.
+    // Migrate the old setting (inPlace boolean) to the save mode.
     if (!stored.outMode && stored.inPlace) s.outMode = 'inplace';
     return s;
   } catch {
@@ -94,7 +94,7 @@ function loadSettings() {
   }
 }
 function saveSettings() {
-  try { localStorage.setItem('sprite-tools', JSON.stringify(settings)); } catch { /* 저장 실패는 무시 */ }
+  try { localStorage.setItem('sprite-tools', JSON.stringify(settings)); } catch { /* ignore save failures */ }
 }
 
 async function suffixFor(cmd) {
@@ -106,7 +106,7 @@ function cmdInfo() {
   return COMMANDS.find((c) => c.id === settings.command) || COMMANDS[0];
 }
 
-// 현재 명령에 실제로 적용되는 저장 방식입니다. 슬라이스/합치기는 따로 저장 위치를 정하고, 팔레트 추출은 덮어쓰기를 지원하지 않습니다.
+// The save mode that actually applies to the current command. Slice/pack choose their own save location, and palette extraction does not support overwriting.
 function effMode() {
   const out = cmdInfo().out;
   if (out === 'slice' || out === 'pack') return 'none';
@@ -158,7 +158,7 @@ function setStatus(key, raw, params, n) {
 const localUrl = (f) => `/local?path=${encodeURIComponent(f.path)}&v=${f.v || 0}`;
 const fmtBytes = (n) => (n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1048576).toFixed(1)} MB`);
 
-// ---------- 탭·옵션 ----------
+// ---------- Tabs and options ----------
 
 function renderTabs() {
   const tabs = $('tabs');
@@ -194,7 +194,7 @@ async function setCommand(id) {
   $('output-dir').hidden = c.out !== 'slice';
   $('inplace-radio').hidden = c.out === 'extract';
   $('suffix').value = await suffixFor(id);
-  if (id === 'recolor') refreshPalettes(); // 팔레트 추출에서 저장한 팔레트가 바로 보이도록 매번 갱신
+  if (id === 'recolor') refreshPalettes(); // refresh every time so palettes saved from palette extraction show up right away
   renderOutput();
   renderRunButton();
   schedulePreview();
@@ -240,7 +240,7 @@ function initOptions() {
   });
   mc.oninput = () => {
     const v = Math.round(Number(mc.value));
-    if (!(v >= 1)) return; // 입력 중인 빈 값은 무시
+    if (!(v >= 1)) return; // ignore an empty value while typing
     settings.maxColors = Math.min(256, v);
     saveSettings();
     schedulePreview();
@@ -272,7 +272,7 @@ function initOptions() {
     input.value = settings[key];
     input.oninput = () => {
       const v = Math.round(Number(input.value));
-      if (!(v >= 0)) return; // 입력 중인 빈 값은 무시
+      if (!(v >= 0)) return; // ignore an empty value while typing
       settings[key] = Math.min(max, v);
       saveSettings();
       schedulePreview();
@@ -282,7 +282,7 @@ function initOptions() {
   numberSetting('despeckle-min', 'minSize', 100000);
   $('despeckle-min').oninput = () => {
     const v = Math.round(Number($('despeckle-min').value));
-    if (!(v >= 1)) return; // 입력 중인 빈 값과 0 은 무시
+    if (!(v >= 1)) return; // ignore an empty value while typing and 0
     settings.minSize = Math.min(100000, v);
     saveSettings();
     schedulePreview();
@@ -297,7 +297,7 @@ function initOptions() {
     b.onclick = () => { settings.packAlign = b.dataset.align; showAlign(); saveSettings(); schedulePreview(); };
   });
 
-  // 팔레트 저장 이름/덮어쓰기는 저장하지 않고 실행할 때만 읽습니다.
+  // The palette save name/overwrite are not stored; they are read only when running.
   $('save-name').onkeydown = (e) => { if (e.key === 'Enter') startRun(); };
 
   document.querySelectorAll('input[name="out-mode"]').forEach((r) => {
@@ -322,7 +322,7 @@ function initOptions() {
   $('recursive').checked = settings.recursive;
   $('recursive').onchange = (e) => { settings.recursive = e.target.checked; saveSettings(); };
 
-  // 팔레트
+  // Palette
   $('palette-select').onchange = (e) => selectPalette(e.target.value);
   const fetchPalette = async () => {
     const name = $('palette-name').value.trim();
@@ -356,7 +356,7 @@ function initOptions() {
   };
   $('palette-browse').onclick = () => BrowserOpenURL('https://lospec.com/palette-list');
 
-  // 확대
+  // Zoom
   renderZoom();
 
   $('reveal-btn').onclick = () => { const f = selectedFile(); if (f) Reveal(f.path); };
@@ -388,15 +388,15 @@ function setZoomMarks() {
   $('zoom-seg').querySelectorAll('button').forEach((b) => b.classList.toggle('on', String(settings.zoom) === b.dataset.zoom));
 }
 
-// ---------- 팔레트 ----------
+// ---------- Palettes ----------
 
 async function refreshPalettes(select) {
   try {
     const list = await ListPalettes();
     const custom = state.palettes.filter((p) => p.name.toLowerCase().endsWith('.png'));
-    // 지난번에 PNG 파일로 고른 팔레트도 다시 불러옵니다.
+    // Also reload the palette picked as a PNG file last time.
     if (settings.palette.toLowerCase().endsWith('.png') && !custom.some((p) => p.name === settings.palette)) {
-      try { custom.push(await LoadPalette(settings.palette)); } catch { /* 파일이 사라졌으면 무시 */ }
+      try { custom.push(await LoadPalette(settings.palette)); } catch { /* ignore if the file is gone */ }
     }
     state.palettes = [...(list || []), ...custom];
   } catch (err) {
@@ -443,9 +443,9 @@ function renderSwatches(p) {
   info.textContent = tn('batch.recolor.info', p.colors.length, { path: p.path });
 }
 
-// ---------- 파일 목록 ----------
+// ---------- File list ----------
 
-// 반환: 이번에 받은 경로 중 열 수 있는(오류 없는) 파일 경로들 (이미 목록에 있던 것도 포함, 순서대로)
+// Returns: openable (error-free) file paths among those received this time (including ones already in the list, in order)
 async function addPaths(paths, opt = {}) {
   if (!paths || !paths.length) return [];
   try {
@@ -477,12 +477,12 @@ function select(path, scroll) {
   schedulePreview();
 }
 
-// 필터에 맞는(화면에 보이는) 파일들입니다. 필터가 없으면 전부입니다.
+// Files that match the filter (visible on screen). All of them if there is no filter.
 function visibleFiles() {
   return state.filter ? state.files.filter((f) => f.name.toLowerCase().includes(state.filter)) : state.files;
 }
 
-// 실행·시트 합치기의 대상: 오류 없는 파일 전부. 필터가 켜져 있고 '보이는 파일만' 이 켜진 경우에만 보이는 파일로 좁힙니다.
+// Targets of run/pack: all error-free files. Narrowed to the visible files only when a filter is on and 'visible files only' is checked.
 function runTargets() {
   const base = state.filter && state.onlyShown ? visibleFiles() : state.files;
   return base.filter((f) => !f.error);
@@ -549,16 +549,16 @@ function renderFiles() {
   $('file-count').textContent = !state.files.length ? ''
     : state.filter ? t('batch.files.count_filtered', { shown: shown.length, total: state.files.length }) : tn('batch.files.count', state.files.length);
   renderRunButton();
-  editor?.filesChanged(); // 편집기의 파일 띠도 같은 목록을 보여 줍니다
+  editor?.filesChanged(); // the editor's file strip shows the same list
 }
 
 function setFilter(text) {
-  if ($('file-filter').value !== text) $('file-filter').value = text; // 편집기의 파일 띠에서 바꾼 경우 입력칸도 맞춤
+  if ($('file-filter').value !== text) $('file-filter').value = text; // also sync the input when it was changed from the editor's file strip
   const t = text.trim().toLowerCase();
   if (t === state.filter) return;
   state.filter = t;
   renderFiles();
-  schedulePreview(); // 시트 합치기 미리보기는 대상 파일이 바뀔 수 있음
+  schedulePreview(); // the pack preview may have different target files
 }
 
 function updateRow(f) {
@@ -566,7 +566,7 @@ function updateRow(f) {
   if (old) old.replaceWith(fileRow(f));
 }
 
-// ---------- 미리보기 ----------
+// ---------- Preview ----------
 
 let previewTimer = 0;
 let previewSeq = 0;
@@ -604,7 +604,7 @@ async function runPreview() {
   if (origImg.dataset.src !== origSrc) {
     origImg.dataset.src = origSrc;
     origImg.src = origSrc;
-    $('compare-img').src = origSrc; // 길게 눌러 비교할 때 바로 보이도록 미리 불러 둠
+    $('compare-img').src = origSrc; // preload so it shows right away when held to compare
   }
   origImg.dataset.w = f.width;
   origImg.dataset.h = f.height;
@@ -620,7 +620,7 @@ async function runPreview() {
   } catch (err) {
     res = { status: 'failed', message: String(err) };
   }
-  if (seq !== previewSeq) return; // 더 최신 요청이 있음
+  if (seq !== previewSeq) return; // a newer request exists
   $('spinner').classList.remove('on');
 
   state.hasResult = res.status === 'done';
@@ -660,7 +660,7 @@ function renderColors(colors) {
   });
 }
 
-// 픽셀이 뭉개지지 않도록 가능한 한 정수 배율로 맞춥니다.
+// Fit at an integer zoom whenever possible so pixels are not smeared.
 function fitScale(w, h, box) {
   const pad = 24;
   const s = Math.min((box.clientWidth - pad) / w, (box.clientHeight - pad) / h);
@@ -668,7 +668,7 @@ function fitScale(w, h, box) {
   return s >= 1 ? Math.floor(s) : s;
 }
 
-// 두 영역은 크기가 같으므로, 같은 크기의 이미지는 맞춤 모드에서도 같은 배율로 표시됩니다.
+// The two areas are the same size, so images of the same size are shown at the same zoom even in fit mode.
 function layoutImages() {
   for (const [img, box] of [[$('orig-img'), $('orig-canvas')], [$('result-img'), $('result-canvas')], [$('compare-img'), $('result-canvas')]]) {
     const w = Number(img.dataset.w), h = Number(img.dataset.h);
@@ -686,9 +686,9 @@ function setZoom(z) {
   layoutImages();
 }
 
-// ---------- 미리보기 상호작용 ----------
+// ---------- Preview interaction ----------
 
-// 픽셀 검사: 이미지를 오프스크린 캔버스에 한 번 그려 두고 거기서 색을 읽습니다. 이미지를 새로 불러오면 다시 그립니다.
+// Pixel inspection: draw the image once to an offscreen canvas and read colors from it. Redrawn when a new image is loaded.
 const pixelCache = new WeakMap(); // img -> {w, h, data}
 function pixelData(img) {
   let c = pixelCache.get(img);
@@ -702,7 +702,7 @@ function pixelData(img) {
     const ctx = cv.getContext('2d', { willReadFrequently: true });
     ctx.drawImage(img, 0, 0);
     c = { w: cv.width, h: cv.height, data: ctx.getImageData(0, 0, cv.width, cv.height).data };
-  } catch { /* 너무 크거나 읽을 수 없으면 좌표만 표시 */ }
+  } catch { /* if too large or unreadable, show only the coordinates */ }
   pixelCache.set(img, c);
   return c;
 }
@@ -715,7 +715,7 @@ function clearProbe(canvas) {
   $(`${key}-meta`).hidden = false;
 }
 
-// 캔버스 위의 마우스 위치를 이미지 픽셀 좌표로 바꿔 캡션에 좌표·색상·알파를 보여줍니다.
+// Convert the mouse position over the canvas to image pixel coordinates and show coordinates, color and alpha in the caption.
 function probe(canvas, clientX, clientY) {
   const key = canvas.id === 'orig-canvas' ? 'orig' : 'result';
   const img = [...canvas.querySelectorAll('img')].find((i) => !i.hidden && i.naturalWidth);
@@ -740,7 +740,7 @@ function probe(canvas, clientX, clientY) {
   $(`${key}-meta`).hidden = true;
 }
 
-// 길게 눌러 비교: 마우스(결과 창)나 Space 를 누르고 있는 동안 결과 창에 원본을 보여줍니다.
+// Hold to compare: while the mouse (result pane) or Space is held, show the original in the result pane.
 function applyCompare() {
   const on = (state.cmpMouse || state.cmpKey) && state.hasResult && !$('orig-img').hidden;
   $('compare-img').hidden = !on;
@@ -756,7 +756,7 @@ function setCompare(kind, on) {
   applyCompare();
 }
 
-// 확대 상태에서 한쪽을 스크롤하면 다른 쪽도 같은 비율로 따라가게 합니다. 코드가 만든 스크롤이 되돌아와 다시 동기화되지 않도록 기억해 둡니다.
+// When one side is scrolled while zoomed, make the other follow at the same ratio. Remember scrolls made by code so they do not come back and sync again.
 let syncEcho = null;
 function linkScroll(a, b) {
   a.addEventListener('scroll', () => {
@@ -773,13 +773,13 @@ function linkScroll(a, b) {
   });
 }
 
-// Ctrl+휠: 확대 단계(맞춤 → 1x … 16x)를 한 칸씩 바꿉니다. 보던 가운데 위치는 유지합니다.
+// Ctrl+wheel: change the zoom step (fit -> 1x ... 16x) one notch at a time. The center position being viewed is kept.
 let wheelAt = 0;
 function wheelZoom(e) {
   if (!e.ctrlKey) return;
   e.preventDefault();
   const now = performance.now();
-  if (now - wheelAt < 90) return; // 트랙패드가 쏟아내는 이벤트를 한 단계로 묶음
+  if (now - wheelAt < 90) return; // merge the flood of trackpad events into one step
   const i = ZOOMS.findIndex((z) => String(z) === String(settings.zoom));
   const j = Math.max(0, Math.min(ZOOMS.length - 1, i + (e.deltaY < 0 ? 1 : -1)));
   if (j === i) return;
@@ -813,7 +813,7 @@ function initPreviewInteraction() {
   rc.addEventListener('mousedown', (e) => {
     if (e.button !== 0) return;
     const r = rc.getBoundingClientRect();
-    if (e.clientX - r.left >= rc.clientWidth || e.clientY - r.top >= rc.clientHeight) return; // 스크롤바
+    if (e.clientX - r.left >= rc.clientWidth || e.clientY - r.top >= rc.clientHeight) return; // scrollbar
     setCompare('cmpMouse', true);
   });
   window.addEventListener('mouseup', () => setCompare('cmpMouse', false));
@@ -824,7 +824,7 @@ function initPreviewInteraction() {
   document.querySelector('.compare').addEventListener('wheel', wheelZoom, { passive: false });
 }
 
-// ---------- 실행 ----------
+// ---------- Run ----------
 
 function renderRunButton() {
   const b = $('run-btn');
@@ -836,7 +836,7 @@ function renderRunButton() {
     $('run-hint').textContent = 'Esc';
     return;
   }
-  // 필터가 켜져 있어도 기본은 목록 전체를 처리합니다. 버튼에 '전체'를 적어 두고, 체크하면 보이는 파일만 처리합니다.
+  // Even with a filter on, the default is to process the whole list. The button says 'All', and when checked only the visible files are processed.
   const filtered = !!state.filter;
   const total = state.files.filter((f) => !f.error).length;
   const shown = visibleFiles().filter((f) => !f.error).length;
@@ -878,7 +878,7 @@ async function startRun() {
 
   targets.forEach((f) => { f.status = 'running'; f.message = ''; });
   renderFiles();
-  // 실행 중에 설정을 바꿔도 결과 안내가 어긋나지 않도록 이번 실행의 설정을 기억해 둡니다.
+  // Remember this run's settings so the result notice does not get out of sync if settings change during the run.
   state.run = { mode, cmd: settings.command, exportDir: settings.exportDir, outDir: settings.outDir, saveName: $('save-name').value.trim() };
   state.backups = [];
   state.backupDirs = [];
@@ -896,7 +896,7 @@ async function startRun() {
   setProgress(0, targets.length);
 }
 
-// 시트 합치기: 저장 위치를 고른 뒤 목록의 모든 파일을 한 장으로 합칩니다.
+// Pack sheet: after choosing a save location, merge all files in the list into one sheet.
 async function runPack(targets) {
   if (state.packing) return;
   state.packing = true;
@@ -946,7 +946,7 @@ EventsOn('job:done', async (s) => {
   setProgress(0, 0);
   renderRunButton();
 
-  // 덮어쓴 파일은 크기·썸네일을 새로 읽습니다.
+  // Overwritten files get their size/thumbnail re-read.
   const run = state.run || { mode: effMode(), cmd: settings.command, exportDir: settings.exportDir, outDir: settings.outDir, saveName: '' };
   const mode = run.mode;
   state.backupDirs = s.backupDirs || [];
@@ -985,16 +985,16 @@ EventsOn('job:done', async (s) => {
   }
   toast(text, s.failed ? 'failed' : '', actions);
 
-  // 팔레트 추출에서 이름을 주고 저장했다면 팔레트 목록을 새로 읽습니다.
+  // If a palette was saved with a name from palette extraction, reload the palette list.
   if (run.cmd === 'extract' && s.done) {
     const saved = run.saveName.toLowerCase();
     if (saved) await refreshPalettes(saved);
   }
 });
 
-// ---------- 공통 UI ----------
+// ---------- Common UI ----------
 
-// 덮어쓴 원본을 백업에서 되돌리고, 목록의 크기·썸네일·미리보기를 새로 읽습니다.
+// Put overwritten originals back from the backup, and re-read the size, thumbnail and preview in the list.
 async function restoreBackups(pairs) {
   try {
     const rep = await RestoreBackups(pairs);
@@ -1003,7 +1003,7 @@ async function restoreBackups(pairs) {
       const f = state.files.find((x) => x.path === pairs[i].path);
       if (f) Object.assign(f, e, { root: f.root, v: Date.now(), status: '', message: '' });
     });
-    if (rep.restored === pairs.length) state.backups = []; // 같은 백업을 두 번 되돌리지 않도록 함
+    if (rep.restored === pairs.length) state.backups = []; // so the same backup is not restored twice
     renderFiles();
     schedulePreview();
     const err = rep.errors && rep.errors.length ? ` ${t('status.restore_errors', { n: rep.errors.length, error: rep.errors[0] })}` : '';
@@ -1014,7 +1014,7 @@ async function restoreBackups(pairs) {
   }
 }
 
-// actions: {label, run} 하나 또는 배열. 버튼을 누르면 알림을 닫고 동작을 실행합니다. 버튼이 있으면 더 오래 보여줍니다.
+// actions: one {label, run} or an array. Pressing a button closes the notice and runs the action. With buttons it is shown longer.
 let toastTimer = 0;
 function toast(text, cls = '', actions = null) {
   const list = !actions ? [] : Array.isArray(actions) ? actions : [actions];
@@ -1030,7 +1030,7 @@ function toast(text, cls = '', actions = null) {
   toastTimer = setTimeout(() => { t.className = 'toast'; }, list.length ? 10000 : 3500);
 }
 
-// ---------- 단축키 도움말 ----------
+// ---------- Shortcut help ----------
 
 function toggleHelp(open = $('help').hidden) {
   $('help').hidden = !open;
@@ -1048,7 +1048,7 @@ function initGlobal() {
   filter.oninput = () => setFilter(filter.value);
   filter.onkeydown = (e) => {
     if (e.key !== 'Escape') return;
-    if (filter.value) { filter.value = ''; setFilter(''); e.stopPropagation(); } // 실행 취소로 번지지 않게 함
+    if (filter.value) { filter.value = ''; setFilter(''); e.stopPropagation(); } // so it does not leak into undo
     else filter.blur();
   };
 
@@ -1064,7 +1064,7 @@ function initGlobal() {
   $('help-close').onclick = () => toggleHelp(false);
   $('help').addEventListener('mousedown', (e) => { if (e.target === $('help')) toggleHelp(false); });
 
-  // 파일 드롭 (Wails 가 실제 경로를 전달)
+  // File drop (Wails passes the real paths)
   const overlay = $('drop-overlay');
   let depth = 0;
   window.addEventListener('dragenter', (e) => { e.preventDefault(); depth++; overlay.classList.add('on'); });
@@ -1075,25 +1075,25 @@ function initGlobal() {
     depth = 0;
     overlay.classList.remove('on');
     if (settings.mode !== 'editor') { addPaths(paths); return; }
-    editor.dropPaths(paths || []); // 목록에 더하고 첫 파일을 엽니다
+    editor.dropPaths(paths || []); // add to the list and open the first file
   }, false);
 
   window.addEventListener('keydown', (e) => {
     const active = document.activeElement;
     const typing = ['INPUT', 'SELECT', 'TEXTAREA'].includes(active?.tagName);
-    // 글자를 입력하는 칸 (체크박스·라디오·슬라이더는 제외)
+    // Fields where text is typed (excluding checkboxes, radios and sliders)
     const entering = active?.tagName === 'SELECT' || active?.tagName === 'TEXTAREA' ||
       (active?.tagName === 'INPUT' && !['checkbox', 'radio', 'range', 'button'].includes(active.type));
     if (e.key === 'Escape' && !$('help').hidden) { toggleHelp(false); return; }
     if (e.key === 'F1' || (e.key === '?' && !entering)) { e.preventDefault(); toggleHelp(); return; }
-    if (!$('help').hidden) return; // 도움말이 열려 있으면 다른 단축키는 막음
+    if (!$('help').hidden) return; // while the help is open, block other shortcuts
     if (e.ctrlKey && !e.altKey && (e.key === '1' || e.key === '2')) { e.preventDefault(); setMode(e.key === '1' ? 'batch' : 'editor'); return; }
-    if (settings.mode === 'editor') return; // 편집기 단축키는 편집기가 처리
+    if (settings.mode === 'editor') return; // the editor handles its own shortcuts
     if (e.ctrlKey && e.key.toLowerCase() === 'f') { e.preventDefault(); $('file-filter').focus(); $('file-filter').select(); return; }
     if (e.ctrlKey && e.key === 'Enter') { e.preventDefault(); startRun(); return; }
     if (e.key === 'Escape' && state.running) { Cancel(); return; }
     if (e.code === 'Space' && !entering && !e.ctrlKey && !e.altKey && !e.metaKey) {
-      e.preventDefault(); // 버튼이 눌리거나 목록이 스크롤되는 것을 막음
+      e.preventDefault(); // prevent a button press or list scroll
       if (!e.repeat) setCompare('cmpKey', true);
       return;
     }
@@ -1120,7 +1120,7 @@ function initGlobal() {
   initPreviewInteraction();
 }
 
-// ---------- 편집기 연결 ----------
+// ---------- Editor connection ----------
 
 const normPath = (p) => p.toLowerCase().split('\\').join('/');
 
@@ -1141,26 +1141,26 @@ function buildEditor() {
     isBlocked: () => !$('help').hidden,
     getBackup: () => settings.backup,
     setBackup: (on) => { settings.backup = on; saveSettings(); renderOutput(); },
-    // 편집기와 일괄 처리가 같은 파일 목록(state.files)을 씁니다.
+    // The editor and batch share the same file list (state.files).
     files: () => state.files,
     getFilter: () => $('file-filter').value,
     setFilter: (text) => setFilter(text),
     addPaths: (paths) => addPaths(paths, { quiet: true }),
     removeFile: (path) => removeFile(path),
-    // 편집기에서 보고 있는 파일을 일괄 처리 목록의 선택으로도 맞춰 둡니다 (미리보기는 일괄 처리로 돌아갈 때 갱신).
+    // Also sync the file being viewed in the editor to the selection of the batch list (the preview is refreshed when returning to batch).
     onCurrentChange: (path) => {
       const f = path && state.files.find((x) => normPath(x.path) === normPath(path));
       if (!f || state.selected === f.path) return;
       state.selected = f.path;
       document.querySelectorAll('.file').forEach((r) => r.classList.toggle('selected', r.dataset.path === f.path));
     },
-    // n: 저장하지 않은 문서 수
+    // n: number of unsaved documents
     onDirtyChange: (n) => {
       dirtyCount = n;
       renderDirtyDot();
       SetEditorDirtyCount(n).catch(() => {});
     },
-    // 저장한 파일이 목록에 있으면 크기·썸네일·미리보기를 새로 읽고, 없으면 목록에 추가할 수 있게 합니다.
+    // If the saved file is in the list, re-read its size, thumbnail and preview; otherwise let it be added to the list.
     onSaved: (path) => {
       const f = state.files.find((x) => normPath(x.path) === normPath(path));
       const actions = [{ label: t('toast.action.reveal'), run: () => Reveal(path) }];
@@ -1186,7 +1186,7 @@ function applyMode() {
   $('editor').hidden = !ed;
   $('mode-seg').querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.mode === settings.mode));
   editor.activate(ed);
-  if (!ed) { // 편집기에서 바뀐 선택을 일괄 처리 화면에 반영
+  if (!ed) { // reflect a selection changed in the editor on the batch screen
     schedulePreview();
     document.querySelector('.file.selected')?.scrollIntoView({ block: 'nearest' });
   }
@@ -1210,7 +1210,7 @@ function initMode() {
   applyMode();
 }
 
-// ---------- 시작 ----------
+// ---------- Start ----------
 
 // ---------- Language ----------
 // The frontend language (src/i18n) is the source of truth: the selector lists the languages that have a frontend catalog.
@@ -1263,7 +1263,7 @@ async function start() {
   initMode();
   $('lang-select').onchange = (e) => { setLanguage(e.target.value); e.target.blur(); };
   onLanguageChange(() => { onLanguageChanged(); });
-  if (import.meta.env.DEV) { window.__addPaths = addPaths; window.__editor = editor; } // 개발 모드(브라우저)에서 드롭 대신 사용
+  if (import.meta.env.DEV) { window.__addPaths = addPaths; window.__editor = editor; } // in dev mode (browser), use instead of drop
   renderStatus();
   renderFiles();
   setCommand(COMMANDS.some((c) => c.id === settings.command) ? settings.command : 'reduce');

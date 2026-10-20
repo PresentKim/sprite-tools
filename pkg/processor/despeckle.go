@@ -7,16 +7,16 @@ import (
 	"sprite-tools/pkg/i18n"
 )
 
-// Despeckle: 파일 단위 DespeckleImage.
+// Despeckle is the file-level DespeckleImage.
 func Despeckle(inputPath, outputPath string, minSize int, diagonal bool) (string, error) {
 	return convertFile(inputPath, outputPath, func(src image.Image) (image.Image, string, error) {
 		return DespeckleImage(src, minSize, diagonal)
 	})
 }
 
-// DespeckleImage: 투명하지 않은(알파 != 0) 픽셀이 이어진 덩어리 가운데 픽셀 수가 minSize 보다 작은 것을 완전 투명(0,0,0,0)으로 지웁니다.
-// diagonal 이면 대각선도 이어진 것으로 보고(8방향), 아니면 상하좌우(4방향)만 봅니다.
-// 지울 덩어리가 없으면 Skip 에러를 반환합니다.
+// DespeckleImage erases (to fully transparent (0,0,0,0)) every connected blob of non-transparent (alpha != 0) pixels that has fewer than minSize pixels.
+// With diagonal, diagonal neighbors count as connected (8-way); otherwise only up/down/left/right (4-way).
+// If there is no blob to erase, it returns a Skip error.
 func DespeckleImage(src image.Image, minSize int, diagonal bool) (image.Image, string, error) {
 	if minSize < 1 {
 		return nil, "", i18n.Errorf("err.despeckle.min_size", minSize)
@@ -30,7 +30,7 @@ func DespeckleImage(src image.Image, minSize int, diagonal bool) (image.Image, s
 		return nil, "", common.Skip("skip.despeckle.min1")
 	}
 
-	// 알파가 있는 픽셀 지도 (1 = 아직 보지 않은 내용 픽셀)
+	// Map of pixels with alpha (1 = content pixel not yet visited)
 	todo := make([]bool, w*h)
 	for y := 0; y < h; y++ {
 		row := n.Pix[y*n.Stride : y*n.Stride+w*4]
@@ -41,7 +41,7 @@ func DespeckleImage(src image.Image, minSize int, diagonal bool) (image.Image, s
 
 	var dst *image.NRGBA
 	comps, pixels := 0, 0
-	var queue []int32 // 덩어리 하나의 픽셀 번호 (탐색 큐를 그대로 목록으로 씀)
+	var queue []int32 // pixel indices of one blob (the search queue doubles as the list)
 	for start := 0; start < w*h; start++ {
 		if !todo[start] {
 			continue

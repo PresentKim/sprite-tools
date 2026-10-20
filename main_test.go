@@ -41,7 +41,7 @@ func TestResolveCommand(t *testing.T) {
 	if cmd, cands := resolveCommand("re"); cmd != nil || !slices.Equal(cands, []string{"reduce", "recolor"}) {
 		t.Errorf("ambiguous prefix: got %v %v", cmd, cands)
 	}
-	// despeckle 이 생기면서 "d" 만으로는 downscale 을 고를 수 없습니다 (ds 는 downscale, dsp 는 despeckle 별칭이라 겹치지 않음).
+	// With despeckle added, "d" alone can no longer select downscale (ds is the downscale alias and dsp the despeckle alias, so they do not collide).
 	if cmd, cands := resolveCommand("d"); cmd != nil || !slices.Equal(cands, []string{"downscale", "despeckle"}) {
 		t.Errorf("ambiguous prefix d: got %v %v", cmd, cands)
 	}
@@ -83,19 +83,19 @@ func TestBackupFlag(t *testing.T) {
 	writeTestPNG(t, p)
 	orig, _ := os.ReadFile(p)
 
-	// -w 없이 -backup 만 쓰면 사용법 오류
+	// -backup alone without -w is a usage error
 	if code := run([]string{"index", "-backup", p}); code != exitUsage {
-		t.Errorf("-backup 단독 사용: exit %d, want %d", code, exitUsage)
+		t.Errorf("-backup alone: exit %d, want %d", code, exitUsage)
 	}
 	if code := run([]string{"index", "-w", "-backup", p}); code != exitOK {
 		t.Fatalf("exit %d", code)
 	}
 	matches, _ := filepath.Glob(filepath.Join(dir, common.BackupDirName, "*", "a.png"))
 	if len(matches) != 1 {
-		t.Fatalf("백업 파일 %d개, want 1", len(matches))
+		t.Fatalf("%d backup files, want 1", len(matches))
 	}
 	if got, _ := os.ReadFile(matches[0]); !bytes.Equal(got, orig) {
-		t.Error("백업이 원본과 다릅니다")
+		t.Error("backup differs from the original")
 	}
 }
 
@@ -108,7 +108,7 @@ func TestDespeckleCommand(t *testing.T) {
 			img.Set(x, y, color.NRGBA{200, 10, 10, 255})
 		}
 	}
-	img.Set(0, 0, color.NRGBA{10, 10, 200, 255}) // 외톨이
+	img.Set(0, 0, color.NRGBA{10, 10, 200, 255}) // isolated pixel
 	f, err := os.Create(p)
 	if err != nil {
 		t.Fatal(err)
@@ -130,7 +130,7 @@ func TestDespeckleCommand(t *testing.T) {
 	}
 	n := common.ToNRGBA(out)
 	if n.NRGBAAt(0, 0).A != 0 || n.NRGBAAt(3, 3).A != 255 {
-		t.Error("외톨이만 지워져야 합니다")
+		t.Error("only the isolated pixel should be removed")
 	}
 }
 
@@ -171,12 +171,12 @@ func TestLanguagePrecedence(t *testing.T) {
 			t.Errorf("env=%q args=%v: language %q, want %q", env, args, got, want)
 		}
 	}
-	check("en", "")                        // 기본값은 영어 (OS 로캘을 보지 않음)
-	check("ko", "ko")                      // 환경 변수
-	check("ko", "ko_KR.UTF-8")             // 로캘 형식도 허용
-	check("en", "ko", "--lang", "en", "x") // 플래그가 환경 변수보다 우선
-	check("ko", "en", "x", "-lang=ko")     // 명령 뒤에 있어도 됨
-	check("en", "klingon")                 // 잘못된 환경 변수는 경고 후 기본값
+	check("en", "")                        // default is English (the OS locale is not consulted)
+	check("ko", "ko")                      // environment variable
+	check("ko", "ko_KR.UTF-8")             // locale format is accepted too
+	check("en", "ko", "--lang", "en", "x") // the flag takes precedence over the environment variable
+	check("ko", "en", "x", "-lang=ko")     // allowed after the command as well
+	check("en", "klingon")                 // an invalid environment variable warns and falls back to the default
 	if _, err := setupLanguage([]string{"--lang", "klingon"}); err == nil {
 		t.Error("unknown --lang should fail")
 	}
@@ -230,7 +230,7 @@ func TestDefaultOutputIsEnglish(t *testing.T) {
 	p := filepath.Join(dir, "a.png")
 	writeTestPNG(t, p)
 	cmds := [][]string{
-		{"help"}, {"help", "reduce"}, {"rd", "-h"}, {"red", "-n", p}, {"rd", p}, {"rd", p}, // 같은 명령을 두 번 실행해도 영어 출력
+		{"help"}, {"help", "reduce"}, {"rd", "-h"}, {"red", "-n", p}, {"rd", p}, {"rd", p}, // running the same command twice still prints English
 		{"nope"}, {"redcue"}, {"re"}, {"simplify", "-n", p}, {"rd", "-k", "-1"}, {"pack"}, {"rd", filepath.Join(dir, "missing.png")},
 	}
 	for _, args := range cmds {
@@ -239,7 +239,7 @@ func TestDefaultOutputIsEnglish(t *testing.T) {
 			t.Errorf("%v: expected non-empty English output, got:\n%s", args, out)
 		}
 	}
-	// 같은 명령이 한국어로는 한글을 출력합니다.
+	// The same command prints Hangul in Korean.
 	out := captureOutput(t, func() { run([]string{"help", "--lang", "ko"}) })
 	if !hangul.MatchString(out) || !strings.Contains(out, "공통 동작:") {
 		t.Errorf("--lang ko help: %s", out)

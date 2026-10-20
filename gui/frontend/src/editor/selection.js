@@ -1,6 +1,6 @@
-// 선택 영역 (DOM 과 무관한 순수 함수).
-// 선택은 "경계 상자 안의 마스크"로 표현합니다: { x, y, w, h, mask: Uint8Array(w*h), count, edges }.
-// 상자 밖은 선택되지 않은 칸이고, 상자만 옮기면 선택이 통째로 이동하므로 떠 있는 층을 끌 때 마스크를 다시 만들지 않아도 됩니다.
+// Selection (pure functions, independent of the DOM).
+// A selection is represented as "a mask inside a bounding box": { x, y, w, h, mask: Uint8Array(w*h), count, edges }.
+// Cells outside the box are unselected, and moving just the box moves the whole selection, so the mask need not be rebuilt when dragging a floating layer.
 
 export function makeSel(x, y, w, h, mask) {
   let count = 0;
@@ -8,7 +8,7 @@ export function makeSel(x, y, w, h, mask) {
   return { x, y, w, h, mask, count, edges: null };
 }
 
-// 사각형 (양 끝 칸 포함, 순서 무관)
+// Rectangle (both end cells inclusive, order does not matter)
 export function rectSel(x0, y0, x1, y1) {
   const l = Math.min(x0, x1), t = Math.min(y0, y1), r = Math.max(x0, x1), b = Math.max(y0, y1);
   const w = r - l + 1, h = b - t + 1;
@@ -21,7 +21,7 @@ export function selHas(s, x, y) {
   return x >= 0 && y >= 0 && x < s.w && y < s.h && s.mask[y * s.w + x] === 1;
 }
 
-// 선택된 칸이 하나도 없으면 null, 있으면 경계 상자를 꼭 맞게 줄인 선택
+// null if no cell is selected; otherwise the selection with its bounding box shrunk to fit
 export function tighten(s) {
   if (!s) return null;
   const { w, h, mask } = s;
@@ -44,7 +44,7 @@ export function tighten(s) {
   return makeSel(s.x + x0, s.y + y0, nw, nh, out);
 }
 
-// 문서 [0,W)×[0,H) 안쪽만 남깁니다.
+// Keep only the part inside the document [0,W)×[0,H).
 export function clipSel(s, W, H) {
   if (!s) return null;
   if (s.x >= 0 && s.y >= 0 && s.x + s.w <= W && s.y + s.h <= H) return s;
@@ -63,7 +63,7 @@ export function allSel(W, H) {
   return rectSel(0, 0, W - 1, H - 1);
 }
 
-// 사각형(양 끝 포함)을 mode(replace | add | sub)로 합칩니다. 문서 크기 W×H 안으로 줄여서 합니다.
+// Combine a rectangle (ends inclusive) using mode (replace | add | sub). It is clipped to the document size W×H first.
 export function combineRect(s, x0, y0, x1, y1, mode, W, H) {
   const l = Math.max(0, Math.min(x0, x1)), t = Math.max(0, Math.min(y0, y1));
   const r = Math.min(W - 1, Math.max(x0, x1)), b = Math.min(H - 1, Math.max(y0, y1));
@@ -86,7 +86,7 @@ export function combineRect(s, x0, y0, x1, y1, mode, W, H) {
   return tighten(makeSel(s.x, s.y, s.w, s.h, out));
 }
 
-// 선택 반전 (문서 전체 기준). 전부 선택돼 있었으면 null
+// Invert the selection (relative to the whole document). null if everything was selected
 export function invertSel(s, W, H) {
   if (!s) return allSel(W, H);
   const out = new Uint8Array(W * H);
@@ -96,7 +96,7 @@ export function invertSel(s, W, H) {
   return tighten(makeSel(0, 0, W, H, out));
 }
 
-// 선택 경계선 조각들 [x0,y0,x1,y1,...] (선택 상자 기준 좌표, 이어진 구간은 하나로 합침). 결과를 캐시합니다.
+// Selection boundary segments [x0,y0,x1,y1,...] (coordinates relative to the selection box, connected runs merged into one). The result is cached.
 export function edgesOf(s) {
   if (s.edges) return s.edges;
   const { w, h, mask } = s;
@@ -122,7 +122,7 @@ export function edgesOf(s) {
   return out;
 }
 
-// 선택에 해당하는 픽셀을 가져옵니다 (선택 밖 칸은 0). 반환: Uint32Array(w*h)
+// Get the pixels under the selection (cells outside it are 0). Returns: Uint32Array(w*h)
 export function extractPix(px32, W, H, s) {
   const out = new Uint32Array(s.w * s.h);
   for (let y = 0; y < s.h; y++) {
@@ -137,7 +137,7 @@ export function extractPix(px32, W, H, s) {
   return out;
 }
 
-// 픽셀 번호 목록(y*W+x)으로 선택을 만듭니다. 비어 있으면 null.
+// Build a selection from a list of pixel indices (y*W+x). null if empty.
 export function fromIndices(list, W) {
   if (!list.length) return null;
   let x0 = Infinity, y0 = Infinity, x1 = -1, y1 = -1;
@@ -154,7 +154,7 @@ export function fromIndices(list, W) {
   return makeSel(x0, y0, w, h, mask);
 }
 
-// 선택 a 에 선택 b 를 합칩니다. mode: replace(b 로 바꿈) | add(합집합) | sub(a 에서 b 를 뺌)
+// Combine selection b into selection a. mode: replace (use b) | add (union) | sub (subtract b from a)
 export function combineSels(a, b, mode) {
   if (mode === 'replace' || !a) return mode === 'sub' ? null : b;
   if (!b) return a;

@@ -1,5 +1,5 @@
-// 문서 탭 막대. 상태는 편집기가 갖고, 여기서는 그려 주고 클릭만 알립니다.
-// 탭: 이름 + 저장 안 한 변경 점(●) + 닫기(×). 미리보기 탭(탐색으로 연 탭)은 이름이 기울어집니다.
+// Document tab bar. The editor owns the state; this only draws and reports clicks.
+// Tab: name + unsaved-change dot (●) + close (×). The name of a preview tab (opened by browsing) is italic.
 import { t as tr } from '../i18n/index.js';
 import { el, localized } from './ui.js';
 
@@ -17,14 +17,14 @@ export function createTabs(cb) {
   clean.onclick = () => { cb.closeClean(); clean.blur(); };
   root.append(list, clean);
 
-  // 휠로 가로 스크롤
+  // Horizontal scroll with the wheel
   list.addEventListener('wheel', (e) => {
     if (list.scrollWidth <= list.clientWidth) return;
     e.preventDefault();
     list.scrollLeft += e.deltaX || e.deltaY;
   }, { passive: false });
 
-  const nodes = new Map(); // id -> 탭 요소
+  const nodes = new Map(); // id -> tab element
 
   function make(id) {
     const tab = el('div', 'ed-tab');
@@ -41,7 +41,7 @@ export function createTabs(cb) {
     x.onpointerdown = (e) => e.stopPropagation();
     tab.append(name, dot, x);
     tab.onpointerdown = (e) => {
-      if (e.button === 1) { e.preventDefault(); return; } // 가운데 버튼 자동 스크롤 방지
+      if (e.button === 1) { e.preventDefault(); return; } // prevent middle-button autoscroll
       if (e.button === 0) cb.activate(id);
     };
     tab.onauxclick = (e) => { if (e.button === 1) { e.preventDefault(); cb.close(id); } };
@@ -71,7 +71,7 @@ export function createTabs(cb) {
       if (name.textContent !== d.name) name.textContent = d.name;
       return tab;
     });
-    // 순서가 같으면 DOM 을 건드리지 않습니다 (클릭 도중 요소가 바뀌지 않도록)
+    // If the order is the same, leave the DOM alone (so elements do not change in the middle of a click)
     const same = ordered.length === list.children.length && ordered.every((t, i) => list.children[i] === t);
     if (!same) list.replaceChildren(...ordered);
     root.hidden = docs.length === 0;

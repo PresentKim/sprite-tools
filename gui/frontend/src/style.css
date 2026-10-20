@@ -63,7 +63,7 @@ p { margin: 0; }
 .spacer { flex: 1; }
 .ellipsis { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 
-/* 상단 */
+/* Top */
 .topbar {
   display: flex; align-items: center; gap: 12px;
   padding: 0 12px; height: 48px;
@@ -91,7 +91,7 @@ p { margin: 0; }
 .tab[aria-selected="true"] { color: var(--text); border-bottom-color: var(--accent); font-weight: 600; }
 .tab kbd { font: 11px/1 inherit; color: var(--muted); border: 1px solid var(--line); border-radius: 4px; padding: 2px 4px; }
 
-/* 레이아웃 */
+/* Layout */
 .layout {
   flex: 1; min-height: 0;
   display: grid; grid-template-columns: 290px minmax(320px, 1fr) minmax(360px, 1.15fr);
@@ -99,7 +99,7 @@ p { margin: 0; }
 }
 .panel { background: var(--panel); min-height: 0; display: flex; flex-direction: column; position: relative; }
 
-/* 옵션 패널 */
+/* Options panel */
 .options .panel-scroll { flex: 1; overflow: auto; padding: 16px; display: flex; flex-direction: column; gap: 18px; }
 .group { display: flex; flex-direction: column; gap: 8px; }
 .group[hidden] { display: none; }
@@ -155,11 +155,11 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); margi
 .run-area { padding: 12px 16px 14px; border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 6px; }
 .run { width: 100%; padding: 10px; font-size: 14px; }
 
-/* 팔레트 */
+/* Palette */
 .swatches { display: grid; grid-template-columns: repeat(auto-fill, minmax(14px, 1fr)); gap: 2px; }
 .swatches span { aspect-ratio: 1; border-radius: 2px; box-shadow: inset 0 0 0 1px rgba(128,128,128,.25); }
 
-/* 툴바 */
+/* Toolbar */
 .toolbar {
   display: flex; align-items: center; gap: 8px; padding: 8px 12px; min-height: 46px;
   border-bottom: 1px solid var(--line);
@@ -167,7 +167,7 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); margi
 .toolbar > * { flex: none; }
 .toolbar > .ellipsis { flex: 0 1 auto; }
 .toolbar > .spacer { flex: 1 1 0; min-width: 0; }
-/* 파일 목록 툴바는 두 줄: 추가/비우기, 필터/하위 폴더 */
+/* The file list toolbar has two rows: add/clear, filter/subfolders */
 .files-toolbar { flex-direction: column; align-items: stretch; gap: 6px; }
 .toolbar-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .toolbar-row > * { flex: none; }
@@ -182,7 +182,7 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); margi
 .lang-select { flex: none; width: auto; padding: 3px 6px; font-size: 12px; cursor: pointer; }
 .no-match { padding: 24px 16px; text-align: center; color: var(--muted); }
 
-/* 파일 목록 */
+/* File list */
 .file-list { flex: 1; overflow: auto; padding: 4px 0; outline: none; }
 .file {
   display: grid; grid-template-columns: 44px 1fr auto 22px; gap: 10px; align-items: center;
@@ -228,7 +228,7 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); margi
   opacity: .7;
 }
 
-/* 미리보기 */
+/* Preview */
 .compare { flex: 1; min-height: 0; display: grid; grid-template-rows: 1fr 1fr; gap: 1px; background: var(--line); }
 .pane { margin: 0; display: flex; flex-direction: column; min-height: 0; background: var(--panel); }
 .pane figcaption { display: flex; justify-content: space-between; gap: 8px; padding: 6px 12px; font-size: 12px; font-weight: 600; }
@@ -276,7 +276,7 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); margi
 .seg button + button { border-left: 1px solid var(--line); }
 .seg button.on { background: var(--panel-2); color: var(--text); font-weight: 600; }
 
-/* 상태 표시줄 */
+/* Status bar */
 .statusbar {
   display: flex; align-items: center; gap: 12px; height: 30px; padding: 0 12px;
   background: var(--panel); border-top: 1px solid var(--line); font-size: 12px;
@@ -285,7 +285,7 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); margi
 .progress.on { display: block; }
 .progress .bar { height: 100%; width: 0; background: var(--accent); transition: width .15s; }
 
-/* 드롭, 토스트 */
+/* Drop, toast */
 .drop-overlay {
   position: fixed; inset: 0; display: none; place-items: center; z-index: 10;
   background: color-mix(in srgb, var(--accent) 18%, transparent); border: 3px dashed var(--accent);
@@ -303,7 +303,7 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); margi
 .toast { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; justify-content: center; }
 .toast button { margin-left: 4px; }
 
-/* 단축키 도움말 */
+/* Shortcut help */
 .overlay {
   position: fixed; inset: 0; z-index: 30; display: grid; place-items: center;
   background: rgba(0,0,0,.45);
@@ -328,7 +328,7 @@ kbd {
 ::-webkit-scrollbar-thumb { background: var(--line); border-radius: 5px; border: 2px solid var(--panel); }
 ::-webkit-scrollbar-corner { background: transparent; }
 
-/* 도움말은 내용이 길어 넓게, 넘치면 스크롤 */
+/* The help is long so make it wide, and scroll if it overflows */
 .dialog.help { width: min(640px, calc(100vw - 48px)); max-height: calc(100vh - 56px); overflow-y: auto; gap: 8px; }
 .dialog.help h3 { margin: 6px 0 0; }
 .dialog.help .keys { gap: 6px 16px; }

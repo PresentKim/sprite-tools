@@ -24,7 +24,7 @@ func resetLanguage(t *testing.T) {
 	t.Cleanup(func() { _ = SetLanguage(DefaultLanguage) })
 }
 
-// verbs: fmt 동사(%[flags][width][.prec]verb)를 순서대로 뽑습니다. "%%" 는 무시합니다.
+// verbs extracts the fmt verbs (%[flags][width][.prec]verb) in order. "%%" is ignored.
 var verbRe = regexp.MustCompile(`%([#+\- 0]*)(\*|\d+)?(\.(\*|\d+)?)?([a-zA-Z%])`)
 
 func verbs(s string) []string {
@@ -97,7 +97,7 @@ func TestCatalogFiles(t *testing.T) {
 		if bytes.HasPrefix(data, []byte("\xef\xbb\xbf")) {
 			t.Errorf("%s: has a BOM", e.Name())
 		}
-		// 키가 정렬되어 있고 중복이 없는지 파일 순서대로 확인합니다.
+		// Check in file order that the keys are sorted and have no duplicates.
 		dec := json.NewDecoder(bytes.NewReader(data))
 		if tok, err := dec.Token(); err != nil || tok != json.Delim('{') {
 			t.Fatalf("%s: not a JSON object", e.Name())
@@ -171,7 +171,7 @@ func TestTAndFallback(t *testing.T) {
 	if got := T("no.such.key", 1); got != "no.such.key" {
 		t.Errorf("missing key: %q", got)
 	}
-	// 현재 언어에 없는 키는 영어로 넘어갑니다.
+	// A key missing in the current language falls back to English.
 	const key = "test.only.in.en"
 	catalogs[DefaultLanguage][key] = "English only %d"
 	defer delete(catalogs[DefaultLanguage], key)
@@ -185,7 +185,7 @@ func TestErrorf(t *testing.T) {
 	_ = SetLanguage("ko")
 	err := Errorf("err.trim.pad", 3)
 	_ = SetLanguage("en")
-	// 에러는 만들어진 시점의 언어로 고정됩니다.
+	// An error is fixed to the language active when it was created.
 	if err.Error() != "여백은 0 이상이어야 합니다: 3" {
 		t.Errorf("got %q", err.Error())
 	}
@@ -210,11 +210,11 @@ func TestLanguages(t *testing.T) {
 	}
 }
 
-// ---------- 소스 코드가 쓰는 키가 모두 en.json 에 있는지 검사 ----------
+// ---------- Check that every key used by the source code exists in en.json ----------
 
-// keyArg: 첫 인자가 아닌 곳에 키가 있는 함수의 위치를 지정합니다. (recv 가 비어 있으면 recv 없는 호출/아무 recv)
+// keyArg specifies the position of the key for functions that take it somewhere other than the first argument. (An empty recv means a call without a receiver / any receiver)
 type keyFunc struct {
-	recv string // 패키지/수신자 식별자 ("" 이면 아무거나, 단 "-" 이면 수신자 없는 호출만)
+	recv string // package/receiver identifier ("" matches anything, but "-" matches only calls without a receiver)
 	arg  int
 }
 
@@ -226,7 +226,7 @@ var keyFuncs = map[string][]keyFunc{
 	"usageError": {{"-", 1}},
 }
 
-// 키처럼 생긴 문자열 리터럴(네임스페이스 접두사 + 점)은 호출 형태와 상관없이 en.json 에 있어야 합니다.
+// String literals that look like keys (namespace prefix + dot) must exist in en.json regardless of how they are called.
 var keyLiteralRe = regexp.MustCompile(`^(cli|cmd|flag|msg|err|skip|gui)\.[a-z0-9_.]+$`)
 
 func repoRoot(t *testing.T) string {

@@ -5,13 +5,13 @@ import (
 	"strings"
 )
 
-// NaturalLess: 숫자 덩어리를 숫자 크기로 비교하는 "자연 정렬" 순서입니다 (frame-2 < frame-10).
-// 대소문자는 무시하고, 숫자 값이 같으면 앞쪽 0이 적은 쪽(짧은 쪽)이 먼저 옵니다.
+// NaturalLess is a "natural sort" order that compares digit runs by numeric value (frame-2 < frame-10).
+// Case is ignored, and when numeric values are equal the one with fewer leading zeros (the shorter one) comes first.
 func NaturalLess(a, b string) bool {
 	return naturalCompare(a, b) < 0
 }
 
-// NaturalSort: 문자열 목록을 자연 정렬 순서로 정렬합니다.
+// NaturalSort sorts a list of strings in natural order.
 func NaturalSort(list []string) {
 	slices.SortStableFunc(list, naturalCompare)
 }

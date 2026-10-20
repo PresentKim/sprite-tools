@@ -1,6 +1,6 @@
 package processor
 
-// goldenWant: 리팩터링 이전 구현으로 기록한 기대값입니다.
+// goldenWant holds the expected values recorded with the pre-refactoring implementation.
 var goldenWant = map[string]string{
 	"nrgba/downscale-0":             "ERR:이미 1:1 크기이거나 배율을 감지할 수 없음, 64x48",
 	"nrgba/downscale-2":             "06d45eaa6465857d|2배 축소, 64x48 → 32x24",

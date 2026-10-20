@@ -1,4 +1,4 @@
-// 색상 유틸. 색은 리틀 엔디언 RGBA 를 담은 uint32 하나로 다룹니다 (Uint8ClampedArray 의 R,G,B,A 바이트 순서와 같음).
+// Color utilities. A color is handled as one uint32 holding little-endian RGBA (the same as the R,G,B,A byte order of a Uint8ClampedArray).
 
 export const pack = (r, g, b, a = 255) => (((a << 24) | (b << 16) | (g << 8) | r) >>> 0);
 
@@ -6,18 +6,18 @@ export function unpack(c) {
   return { r: c & 255, g: (c >>> 8) & 255, b: (c >>> 16) & 255, a: c >>> 24 };
 }
 
-// 완전 투명한 픽셀은 RGB 값과 상관없이 같은 색으로 취급하기 위해 0 으로 맞춥니다.
+// Fully transparent pixels are normalized to 0 so they count as the same color regardless of their RGB values.
 export const norm = (c) => (c >>> 24 === 0 ? 0 : c);
 
 const h2 = (n) => n.toString(16).padStart(2, '0');
 
-// 알파가 255 면 #rrggbb, 아니면 #rrggbbaa
+// #rrggbb if alpha is 255, otherwise #rrggbbaa
 export function toHex(c) {
   const { r, g, b, a } = unpack(c);
   return `#${h2(r)}${h2(g)}${h2(b)}${a === 255 ? '' : h2(a)}`;
 }
 
-// #rgb, #rgba, #rrggbb, #rrggbbaa ('#' 는 생략 가능). 잘못된 값이면 null.
+// #rgb, #rgba, #rrggbb, #rrggbbaa (the '#' is optional). null for an invalid value.
 export function parseHex(s) {
   let t = String(s).trim().replace(/^#/, '');
   if (!/^[0-9a-fA-F]+$/.test(t)) return null;
@@ -32,7 +32,7 @@ export function css(c) {
   return `rgba(${r},${g},${b},${(a / 255).toFixed(3)})`;
 }
 
-// 두 색의 채널별 최대 차이 (둘 다 완전 투명이면 0)
+// Maximum per-channel difference between two colors (0 if both are fully transparent)
 export function diff(a, b) {
   if (a >>> 24 === 0 && b >>> 24 === 0) return 0;
   return Math.max(
@@ -43,7 +43,7 @@ export function diff(a, b) {
   );
 }
 
-// Uint8ClampedArray <-> base64 (Go 와 주고받는 픽셀 형식)
+// Uint8ClampedArray <-> base64 (the pixel format exchanged with Go)
 export function toBase64(bytes) {
   const CH = 0x8000;
   let s = '';
@@ -58,7 +58,7 @@ export function fromBase64(b64, out) {
   return out;
 }
 
-// 비곱셈 RGBA 두 색의 source-over 합성 (src 를 dst 위에)
+// Source-over compositing of two non-premultiplied RGBA colors (src over dst)
 export function over(src, dst) {
   const sa = src >>> 24;
   if (sa === 255 || dst >>> 24 === 0) return src;

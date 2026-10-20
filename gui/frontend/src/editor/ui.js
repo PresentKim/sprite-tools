@@ -1,4 +1,4 @@
-// 편집기에서 쓰는 작은 UI 도구: 요소 생성, 모달 대화상자.
+// Small UI helpers used by the editor: element creation and modal dialogs.
 
 // Labels of static widgets (built once) register a function with localized(): it runs now and again after every
 // language change (relabel()). Dynamic content (menus, option panels, rows) is simply re-rendered with t().
@@ -21,8 +21,8 @@ export const el = (tag, cls, text) => {
 let openCount = 0;
 export const isModalOpen = () => openCount > 0;
 
-// 모달 대화상자. build(body) 로 본문을 채우고, 눌린 버튼의 value 로 resolve 합니다 (Esc/바깥 클릭 = null).
-// buttons: [{label, value, primary, validate}]. validate() 가 false 를 반환하면 닫지 않습니다.
+// Modal dialog. build(body) fills the body, and it resolves with the value of the pressed button (Esc/outside click = null).
+// buttons: [{label, value, primary, validate}]. If validate() returns false, the dialog does not close.
 export function modal({ title, build, buttons }) {
   return new Promise((resolve) => {
     const back = el('div', 'overlay');
@@ -50,7 +50,7 @@ export function modal({ title, build, buttons }) {
     function onKey(e) {
       if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); done(null); }
       else if (e.key === 'Enter' && primary && e.target.tagName !== 'BUTTON') { e.preventDefault(); e.stopPropagation(); primary.click(); }
-      else if (e.key.length === 1 || e.key === 'Backspace') e.stopPropagation(); // 대화상자 입력이 단축키로 번지지 않게
+      else if (e.key.length === 1 || e.key === 'Backspace') e.stopPropagation(); // keep dialog input from leaking into shortcuts
     }
     window.addEventListener('keydown', onKey, true);
     back.addEventListener('mousedown', (e) => { if (e.target === back) done(null); });

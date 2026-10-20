@@ -19,39 +19,39 @@ import (
 	"sprite-tools/pkg/processor"
 )
 
-// 편집기 문서의 크기 한도입니다 (RGBA 4바이트 * 픽셀 수).
+// Size limit of an editor document (RGBA 4 bytes * pixel count).
 const (
 	maxEditorSide   = 8192
 	maxEditorPixels = 4096 * 4096
 )
 
-// EditorImage: 편집기로 불러온 이미지입니다. Pixels 는 비곱셈(non-premultiplied) RGBA 바이트를 base64 로 인코딩한 값입니다.
+// EditorImage is an image loaded into the editor. Pixels is non-premultiplied RGBA bytes encoded as base64.
 type EditorImage struct {
 	Path    string `json:"path"`
 	Width   int    `json:"width"`
 	Height  int    `json:"height"`
 	Pixels  string `json:"pixels"`
-	Indexed bool   `json:"indexed"` // 원본이 팔레트(인덱스) PNG 였는지
-	Colors  int    `json:"colors"`  // Indexed 일 때 원본 팔레트 크기
+	Indexed bool   `json:"indexed"` // whether the original was a paletted (indexed) PNG
+	Colors  int    `json:"colors"`  // original palette size when Indexed
 }
 
-// SaveResult: 편집기 저장 결과입니다. Canceled 는 저장 대화상자를 취소했을 때만 true 입니다.
+// SaveResult is the result of an editor save. Canceled is true only when the save dialog was canceled.
 type SaveResult struct {
 	Canceled bool   `json:"canceled"`
 	Path     string `json:"path"`
 	Format   string `json:"format"` // indexed | rgba
-	Colors   int    `json:"colors"` // indexed 일 때 팔레트 크기
-	Backup   string `json:"backup"` // 덮어쓰기 전에 복사해 둔 원본 경로 (없으면 빈 값)
+	Colors   int    `json:"colors"` // palette size when indexed
+	Backup   string `json:"backup"` // path of the original copied before overwriting (empty if none)
 	Bytes    int64  `json:"bytes"`
 }
 
-// SetEditorDirty: 편집기에 저장하지 않은 문서가 하나라도 있는지 알려 줍니다 (창을 닫을 때 확인하는 데 씁니다).
-// 몇 개인지 알려 주려면 SetEditorDirtyCount 를 쓰세요.
+// SetEditorDirty tells whether the editor has any unsaved document (used to confirm when closing the window).
+// Use SetEditorDirtyCount to report how many.
 func (a *App) SetEditorDirty(dirty bool) {
 	a.SetEditorDirtyCount(b2i(dirty))
 }
 
-// SetEditorDirtyCount: 편집기에서 저장하지 않은 변경이 있는 문서 수를 알려 줍니다. 0 보다 크면 SetEditorDirty 가 true 인 것과 같습니다.
+// SetEditorDirtyCount reports the number of documents with unsaved changes in the editor. Greater than 0 is the same as SetEditorDirty being true.
 func (a *App) SetEditorDirtyCount(n int) {
 	if n < 0 {
 		n = 0
@@ -59,7 +59,7 @@ func (a *App) SetEditorDirtyCount(n int) {
 	a.editorDirty.Store(int32(n))
 }
 
-// dirtyMessage: 종료 확인 창에 보여 줄 안내 문구입니다.
+// dirtyMessage is the text shown in the close confirmation dialog.
 func dirtyMessage(n int) string {
 	if n <= 1 {
 		return i18n.T("gui.dialog.unsaved.message_one")
@@ -67,7 +67,7 @@ func dirtyMessage(n int) string {
 	return i18n.T("gui.dialog.unsaved.message_many", n)
 }
 
-// beforeClose: 편집기에 저장하지 않은 변경이 있으면 종료 전에 한 번 더 묻습니다. true 를 반환하면 종료를 막습니다.
+// beforeClose asks once more before quitting if the editor has unsaved changes. Returning true prevents quitting.
 func (a *App) beforeClose(ctx context.Context) bool {
 	n := int(a.editorDirty.Load())
 	if n <= 0 {
@@ -88,7 +88,7 @@ func (a *App) beforeClose(ctx context.Context) bool {
 	return choice != quit && choice != "Yes"
 }
 
-// LoadImageRGBA: PNG 를 Go 에서 디코딩해 정밀한 RGBA 픽셀로 돌려줍니다 (브라우저 캔버스의 알파 반올림을 피하기 위함).
+// LoadImageRGBA decodes a PNG in Go and returns exact RGBA pixels (to avoid the browser canvas alpha rounding).
 func (a *App) LoadImageRGBA(path string) (EditorImage, error) {
 	return loadImageRGBA(path)
 }
@@ -110,7 +110,7 @@ func loadImageRGBA(path string) (EditorImage, error) {
 	out := EditorImage{Path: path, Width: w, Height: h}
 	var pix []byte
 	if p, ok := img.(*image.Paletted); ok {
-		// 팔레트 색은 이미 비곱셈 값이므로, 알파가 낮은 색도 손실 없이 옮기도록 항목별로 변환합니다.
+		// Palette colors are already non-premultiplied, so convert entry by entry so that low-alpha colors are moved without loss.
 		out.Indexed, out.Colors = true, len(p.Palette)
 		table := make([]color.NRGBA, 256)
 		for i, c := range p.Palette {
@@ -132,13 +132,13 @@ func loadImageRGBA(path string) (EditorImage, error) {
 	return out, nil
 }
 
-// SaveImageRGBA: 편집한 픽셀을 PNG 로 원자적으로 저장합니다. 같은 이름의 파일을 덮어쓰고 backup 이면 원본을 먼저 백업합니다.
-// 원본이 인덱스 PNG 였고 색이 256개 이하면 인덱스 PNG 로 다시 저장합니다.
+// SaveImageRGBA atomically saves the edited pixels as a PNG. It overwrites a file of the same name, and with backup it backs up the original first.
+// If the original was an indexed PNG and has 256 colors or fewer, it is saved as an indexed PNG again.
 func (a *App) SaveImageRGBA(path string, width, height int, pixelsB64 string, backup bool) (SaveResult, error) {
 	return saveImageRGBA(path, path, width, height, pixelsB64, backup)
 }
 
-// SaveImageAs: 저장 대화상자로 위치를 고른 뒤 저장합니다. paletteFrom 은 인덱스 PNG 의 팔레트를 이어받을 원본 경로입니다(없으면 빈 값).
+// SaveImageAs picks a location with a save dialog and then saves. paletteFrom is the source path whose indexed-PNG palette is inherited (empty if none).
 func (a *App) SaveImageAs(paletteFrom, suggest string, width, height int, pixelsB64 string, backup bool) (SaveResult, error) {
 	opts := runtime.SaveDialogOptions{
 		Title:                i18n.T("gui.dialog.save_as"),
@@ -165,7 +165,7 @@ func (a *App) SaveImageAs(paletteFrom, suggest string, width, height int, pixels
 	return saveImageRGBA(out, paletteFrom, width, height, pixelsB64, backup)
 }
 
-// saveImageRGBA: path 에 저장합니다. paletteFrom 이 인덱스 PNG 면 그 팔레트 순서를 유지해 인덱스로 저장합니다.
+// saveImageRGBA saves to path. If paletteFrom is an indexed PNG, it keeps that palette order and saves as indices.
 func saveImageRGBA(path, paletteFrom string, width, height int, pixelsB64 string, backup bool) (SaveResult, error) {
 	path = absPath(path)
 	if !strings.EqualFold(filepath.Ext(path), ".png") {
@@ -182,7 +182,7 @@ func saveImageRGBA(path, paletteFrom string, width, height int, pixelsB64 string
 		return SaveResult{}, i18n.Errorf("err.gui.pixel_len", len(pix), width*height*4)
 	}
 
-	// 원본 팔레트는 덮어쓰기 전에 읽어 둡니다.
+	// Read the original palette before overwriting.
 	var origPal color.Palette
 	if paletteFrom != "" {
 		if src, err := common.LoadPNG(absPath(paletteFrom)); err == nil {
@@ -225,14 +225,14 @@ func saveImageRGBA(path, paletteFrom string, width, height int, pixelsB64 string
 
 func packPix(p []byte) uint32 { return common.PackNRGBA(p[0], p[1], p[2], p[3]) }
 
-// toPaletted: 원본 팔레트의 순서를 유지하며 픽셀을 인덱스 이미지로 바꿉니다. 색이 256개를 넘으면 nil 입니다.
-//   - 완전 투명(알파 0) 픽셀은 모두 원본의 첫 투명 항목에 매핑하고, 원본에 투명 항목이 없으면 0번에 새 투명 항목을 넣습니다.
-//   - 새 색은 처음 나온 순서대로 뒤에 덧붙입니다.
-//   - 항목 전체가 256개를 넘으면 쓰이지 않는 원본 항목을 버립니다.
+// toPaletted converts pixels to an indexed image keeping the original palette order. Returns nil if there are more than 256 colors.
+//   - Fully transparent (alpha 0) pixels all map to the first transparent entry of the original; if it has none, a new transparent entry is put at index 0.
+//   - New colors are appended in order of first appearance.
+//   - If the total entries exceed 256, unused original entries are dropped.
 func toPaletted(orig color.Palette, w, h int, pix []byte) *image.Paletted {
 	origN := make([]color.NRGBA, len(orig))
-	origIdx := map[uint32]int{} // 불투명·반투명 색 -> 원본 첫 위치
-	origT := -1                 // 원본의 첫 투명 항목
+	origIdx := map[uint32]int{} // opaque/translucent color -> original first position
+	origT := -1                 // first transparent entry of the original
 	for i, c := range orig {
 		n := color.NRGBAModel.Convert(c).(color.NRGBA)
 		origN[i] = n
@@ -249,7 +249,7 @@ func toPaletted(orig color.Palette, w, h int, pix []byte) *image.Paletted {
 	}
 
 	used := map[uint32]bool{}
-	var fresh []uint32 // 원본에 없는 새 색 (처음 나온 순서)
+	var fresh []uint32 // new colors not in the original (in order of first appearance)
 	hasT := false
 	for i := 0; i < len(pix); i += 4 {
 		if pix[i+3] == 0 {
@@ -349,7 +349,7 @@ func b2i(b bool) int {
 	return 0
 }
 
-// ProcessResult: ProcessPixels 의 결과입니다. Skipped 이면 처리할 것이 없어 Pixels 는 비어 있고 Message 에 이유가 들어 있습니다.
+// ProcessResult is the result of ProcessPixels. When Skipped, there was nothing to process so Pixels is empty and Message holds the reason.
 type ProcessResult struct {
 	Skipped bool   `json:"skipped"`
 	Message string `json:"message"`
@@ -358,11 +358,11 @@ type ProcessResult struct {
 	Pixels  string `json:"pixels"`
 }
 
-// 편집기에서 현재 이미지에 적용할 수 있는 일괄 처리 명령입니다.
+// Batch commands that can be applied to the current image in the editor.
 var editorCommands = map[string]bool{"reduce": true, "recolor": true, "downscale": true, "upscale": true, "trim": true, "despeckle": true}
 
-// ProcessPixels: 편집 중인 픽셀(비곱셈 RGBA, base64)에 일괄 처리 명령(reduce·recolor·downscale·upscale·trim·despeckle)을 적용한 결과를 돌려줍니다.
-// 파일을 건드리지 않으며, 처리할 것이 없으면(Skip) 오류 없이 Skipped 로 알립니다.
+// ProcessPixels applies a batch command (reduce, recolor, downscale, upscale, trim, despeckle) to the pixels being edited (non-premultiplied RGBA, base64) and returns the result.
+// It does not touch files; if there is nothing to process (Skip), it reports Skipped without an error.
 func (a *App) ProcessPixels(req JobRequest, width, height int, pixelsB64 string) (ProcessResult, error) {
 	if !editorCommands[req.Command] {
 		return ProcessResult{}, i18n.Errorf("err.gui.editor_command", req.Command)
@@ -397,7 +397,7 @@ func (a *App) ProcessPixels(req JobRequest, width, height int, pixelsB64 string)
 	return ProcessResult{Message: msg, Width: w, Height: h, Pixels: base64.StdEncoding.EncodeToString(n.Pix)}, nil
 }
 
-// paletteStrip: "#rrggbb" 목록을 팔레트 PNG(색 1개 = 1px, 한 줄)로 만듭니다. 투명도는 무시하고 불투명 색으로 저장합니다.
+// paletteStrip: "// paletteStrip makes a palette PNG (one color = 1px, a single row) from a list of "#rrggbb". Transparency is ignored and colors are saved as opaque.
 func paletteStrip(colors []string) (image.Image, error) {
 	if len(colors) == 0 {
 		return nil, i18n.Errorf("err.gui.no_colors")
@@ -420,7 +420,7 @@ func paletteStrip(colors []string) (image.Image, error) {
 	return dst, nil
 }
 
-// PaletteExists: 같은 이름의 저장된 팔레트가 이미 있는지 알려 줍니다.
+// PaletteExists tells whether a saved palette with the same name already exists.
 func (a *App) PaletteExists(name string) (bool, error) {
 	clean, err := processor.NormalizePaletteName(name)
 	if err != nil {
@@ -434,8 +434,8 @@ func (a *App) PaletteExists(name string) (bool, error) {
 	return false, nil
 }
 
-// SavePaletteColors: 색 목록("#rrggbb")을 공용 팔레트 폴더에 이름으로 저장합니다 (일괄 처리의 extract -save 와 같은 폴더·규칙).
-// 같은 이름이 있으면 force 가 아닌 한 거부합니다.
+// SavePaletteColors saves a color list ("#rrggbb") to the shared palette folder by name (same folder and rules as extract -save in batch processing).
+// If the name exists, it is rejected unless force is set.
 func (a *App) SavePaletteColors(name string, colors []string, force bool) (PaletteInfo, error) {
 	img, err := paletteStrip(colors)
 	if err != nil {

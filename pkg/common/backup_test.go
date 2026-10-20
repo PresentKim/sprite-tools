@@ -41,33 +41,33 @@ func TestBackupCreatedBeforeOverwrite(t *testing.T) {
 	}, func(r Result) { results = append(results, r) })
 
 	if sum.Done != 2 || sum.Backups != 2 || len(sum.BackupDirs) != 2 {
-		t.Fatalf("요약이 예상과 다릅니다: %+v", sum)
+		t.Fatalf("unexpected summary: %+v", sum)
 	}
 	for _, r := range results {
 		if r.Backup == "" {
-			t.Fatalf("백업 경로가 없습니다: %+v", r)
+			t.Fatalf("no backup path: %+v", r)
 		}
 		want := "old-a"
 		if strings.HasSuffix(r.Input, "b.png") {
 			want = "old-b"
 		}
 		if got := readFile(t, r.Backup); got != want {
-			t.Errorf("%s 백업 내용 = %q, want %q", r.Input, got, want)
+			t.Errorf("%s backup content = %q, want %q", r.Input, got, want)
 		}
 		if got := readFile(t, r.Input); got != "new" {
-			t.Errorf("%s 덮어쓰기 결과 = %q", r.Input, got)
+			t.Errorf("%s overwrite result = %q", r.Input, got)
 		}
-		// 백업 위치: <파일 폴더>/.sprite-tools-backup/<시각>/<이름>
+		// Backup location: <file folder>/.sprite-tools-backup/<time>/<name>
 		stampDir := filepath.Dir(r.Backup)
 		if filepath.Base(r.Backup) != filepath.Base(r.Input) ||
 			filepath.Base(filepath.Dir(stampDir)) != BackupDirName ||
 			filepath.Dir(filepath.Dir(stampDir)) != filepath.Dir(r.Input) {
-			t.Errorf("백업 위치가 예상과 다릅니다: %s", r.Backup)
+			t.Errorf("unexpected backup location: %s", r.Backup)
 		}
 	}
-	// 한 번 실행에는 시각 폴더 이름이 같아야 합니다.
+	// All backups of one run must share the same timestamp folder name.
 	if filepath.Base(filepath.Dir(results[0].Backup)) != filepath.Base(filepath.Dir(results[1].Backup)) {
-		t.Errorf("한 번 실행의 백업 폴더 시각이 서로 다릅니다")
+		t.Errorf("backup folders of one run have different timestamps")
 	}
 }
 
@@ -81,20 +81,20 @@ func TestBackupRemovedOnSkipAndFail(t *testing.T) {
 	o := Options{InPlace: true, Backup: true, Threads: 1}
 	sum := RunFiles(context.Background(), []string{skip, fail}, o, func(in, out string) (string, error) {
 		if in == skip {
-			return "", Skip("바뀌는 것이 없음")
+			return "", Skip("nothing changes")
 		}
 		return "", os.ErrInvalid
 	}, func(r Result) {
 		if r.Backup != "" {
-			t.Errorf("건너뜀/실패한 파일에 백업 경로가 남았습니다: %+v", r)
+			t.Errorf("a skipped/failed file kept a backup path: %+v", r)
 		}
 	})
 	if sum.Skipped != 1 || sum.Failed != 1 || sum.Backups != 0 || len(sum.BackupDirs) != 0 {
-		t.Fatalf("요약이 예상과 다릅니다: %+v", sum)
+		t.Fatalf("unexpected summary: %+v", sum)
 	}
-	// 백업 폴더 자체도 남지 않아야 합니다.
+	// The backup folder itself must not be left behind either.
 	if _, err := os.Stat(filepath.Join(dir, BackupDirName)); !os.IsNotExist(err) {
-		t.Errorf("빈 백업 폴더가 남았습니다 (err=%v)", err)
+		t.Errorf("empty backup folder left behind (err=%v)", err)
 	}
 }
 
@@ -106,10 +106,10 @@ func TestBackupOffByDefault(t *testing.T) {
 		return "", os.WriteFile(out, []byte("new"), 0o644)
 	}, nil)
 	if sum.Backups != 0 {
-		t.Fatalf("Backup 이 꺼져 있는데 백업됨: %+v", sum)
+		t.Fatalf("backed up although Backup is off: %+v", sum)
 	}
 	if _, err := os.Stat(filepath.Join(dir, BackupDirName)); !os.IsNotExist(err) {
-		t.Errorf("백업 폴더가 만들어졌습니다")
+		t.Errorf("a backup folder was created")
 	}
 }
 
@@ -122,16 +122,16 @@ func TestBackupNotScanned(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(files) != 1 {
-		t.Fatalf("백업 폴더가 스캔에 포함됨: %v", files)
+		t.Fatalf("backup folder included in the scan: %v", files)
 	}
 }
 
 func TestValidateBackupNeedsInPlace(t *testing.T) {
 	if err := (Options{Backup: true, Suffix: "_x"}).Validate(); err == nil {
-		t.Error("InPlace 없이 Backup 을 켜면 오류여야 합니다")
+		t.Error("enabling Backup without InPlace should be an error")
 	}
 	if err := (Options{Backup: true, InPlace: true}).Validate(); err != nil {
-		t.Errorf("InPlace+Backup 은 유효해야 합니다: %v", err)
+		t.Errorf("InPlace+Backup should be valid: %v", err)
 	}
 }
 
@@ -145,17 +145,17 @@ func TestRestoreBackup(t *testing.T) {
 		return "", os.WriteFile(out, []byte("new"), 0o644)
 	}, func(r Result) { backup = r.Backup })
 	if readFile(t, a) != "new" {
-		t.Fatal("덮어쓰기가 되지 않았습니다")
+		t.Fatal("the file was not overwritten")
 	}
 
 	if err := RestoreBackup(backup, a); err != nil {
 		t.Fatal(err)
 	}
 	if got := readFile(t, a); got != "old" {
-		t.Errorf("복원 결과 = %q, want old", got)
+		t.Errorf("restore result = %q, want old", got)
 	}
 	if _, err := os.Stat(backup); err != nil {
-		t.Errorf("복원 후에도 백업 파일은 남아 있어야 합니다: %v", err)
+		t.Errorf("the backup file should remain after restore: %v", err)
 	}
 }
 
@@ -166,14 +166,14 @@ func TestRestoreBackupRejectsOutsideBackupDir(t *testing.T) {
 	writeFile(t, src, "x")
 	writeFile(t, dst, "y")
 	if err := RestoreBackup(src, dst); err == nil {
-		t.Error("백업 폴더 밖의 파일은 복원할 수 없어야 합니다")
+		t.Error("a file outside the backup folder must not be restorable")
 	}
 	if readFile(t, dst) != "y" {
-		t.Error("거부된 복원이 대상 파일을 바꿨습니다")
+		t.Error("a rejected restore changed the target file")
 	}
 }
 
-// 백업 파일은 원래 있던 위치(<폴더>/<이름>)로만 복원할 수 있어야 합니다.
+// A backup file can only be restored to its original location (<folder>/<name>).
 func TestRestoreBackupRejectsOtherDestination(t *testing.T) {
 	dir := t.TempDir()
 	backup := filepath.Join(dir, BackupDirName, "20260101-000000", "a.png")
@@ -183,19 +183,19 @@ func TestRestoreBackupRejectsOtherDestination(t *testing.T) {
 	writeFile(t, backup, "old")
 	other := t.TempDir()
 	for _, dest := range []string{
-		filepath.Join(dir, "b.png"),   // 이름이 다름
-		filepath.Join(other, "a.png"), // 폴더가 다름
+		filepath.Join(dir, "b.png"),   // different name
+		filepath.Join(other, "a.png"), // different folder
 		filepath.Join(dir, "sub", "a.png"),
 	} {
 		if err := RestoreBackup(backup, dest); err == nil {
-			t.Errorf("%s 로의 복원은 거부되어야 합니다", dest)
+			t.Errorf("restoring to %s should be rejected", dest)
 		}
 		if _, err := os.Stat(dest); err == nil {
-			t.Errorf("거부된 복원이 %s 를 만들었습니다", dest)
+			t.Errorf("a rejected restore created %s", dest)
 		}
 	}
 	if err := RestoreBackup(backup, filepath.Join(dir, "a.png")); err != nil {
-		t.Errorf("원래 위치로의 복원은 허용되어야 합니다: %v", err)
+		t.Errorf("restoring to the original location should be allowed: %v", err)
 	}
 }
 
@@ -205,15 +205,15 @@ func TestBackupFileNow(t *testing.T) {
 	writeFile(t, p, "old")
 	b, err := BackupFileNow(p)
 	if err != nil || b == "" {
-		t.Fatalf("백업 실패: %q %v", b, err)
+		t.Fatalf("backup failed: %q %v", b, err)
 	}
 	if filepath.Base(filepath.Dir(filepath.Dir(b))) != BackupDirName || filepath.Base(b) != "a.png" {
-		t.Errorf("백업 위치가 예상과 다릅니다: %s", b)
+		t.Errorf("unexpected backup location: %s", b)
 	}
 	if got := readFile(t, b); got != "old" {
-		t.Errorf("백업 내용 = %q", got)
+		t.Errorf("backup content = %q", got)
 	}
 	if b, err := BackupFileNow(filepath.Join(dir, "none.png")); err != nil || b != "" {
-		t.Errorf("없는 파일은 빈 경로여야 합니다: %q %v", b, err)
+		t.Errorf("a missing file should give an empty path: %q %v", b, err)
 	}
 }

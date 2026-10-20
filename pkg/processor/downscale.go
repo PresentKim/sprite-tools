@@ -14,12 +14,12 @@ func gcd(a, b int) int {
 	return a
 }
 
-// detectScale: 같은 색이 연속되는 구간 길이들의 최대공약수로 픽셀 확대 배율을 추정합니다.
+// detectScale estimates the pixel upscale factor as the greatest common divisor of the lengths of runs of the same color.
 func detectScale(img image.Image) int {
 	return detectScaleNRGBA(common.ToNRGBA(img))
 }
 
-// detectScaleNRGBA: detectScale 의 NRGBA(경계가 0,0 시작) 전용 구현입니다. Pix 를 직접 비교합니다.
+// detectScaleNRGBA is the NRGBA-only implementation of detectScale (bounds start at 0,0). It compares Pix directly.
 func detectScaleNRGBA(img *image.NRGBA) int {
 	width, height := img.Rect.Dx(), img.Rect.Dy()
 	scale := gcd(width, height)
@@ -28,7 +28,7 @@ func detectScaleNRGBA(img *image.NRGBA) int {
 	}
 	pix, stride := img.Pix, img.Stride
 
-	// 가로: 각 행에서 같은 색이 이어지는 길이
+	// Horizontal: length of same-color runs in each row
 	for y := 0; y < height; y++ {
 		row := pix[y*stride : y*stride+width*4]
 		currentLen := 1
@@ -46,7 +46,7 @@ func detectScaleNRGBA(img *image.NRGBA) int {
 		}
 	}
 
-	// 세로: 행 단위로 훑으며 열마다 이어지는 길이를 센다(메모리 접근이 연속적).
+	// Vertical: scan row by row and count the run lengths per column (memory access is sequential).
 	runs := make([]int, width)
 	for x := range runs {
 		runs[x] = 1
@@ -75,14 +75,14 @@ func detectScaleNRGBA(img *image.NRGBA) int {
 	return scale
 }
 
-// Downscale: 파일 단위 DownscaleImage.
+// Downscale is the file-level DownscaleImage.
 func Downscale(inputPath, outputPath string, forceScale int) (string, error) {
 	return convertFile(inputPath, outputPath, func(src image.Image) (image.Image, string, error) {
 		return DownscaleImage(src, forceScale)
 	})
 }
 
-// DownscaleImage: 확대된 픽셀 아트를 1:1 크기로 줄입니다. forceScale > 0 이면 자동 감지 대신 해당 배율을 사용합니다.
+// DownscaleImage shrinks upscaled pixel art back to 1:1 size. If forceScale > 0, that factor is used instead of auto-detection.
 func DownscaleImage(src image.Image, forceScale int) (image.Image, string, error) {
 	bounds := src.Bounds()
 	n := common.ToNRGBA(src)

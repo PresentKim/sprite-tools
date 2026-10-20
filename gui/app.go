@@ -26,7 +26,7 @@ import (
 	"sprite-tools/pkg/processor"
 )
 
-// App: 화면(JS)에서 호출하는 메서드를 제공합니다. 실제 처리는 CLI 와 같은 processor 패키지가 담당합니다.
+// App provides the methods called from the UI (JS). The actual processing is done by the same processor package as the CLI.
 type App struct {
 	ctx context.Context
 
@@ -40,7 +40,7 @@ type App struct {
 	srcCache map[string]cachedImage
 	srcOrder []string
 
-	editorDirty atomic.Int32 // 편집기에서 저장하지 않은 문서 수
+	editorDirty atomic.Int32 // number of unsaved documents in the editor
 }
 
 type loadedPalette struct {
@@ -65,56 +65,56 @@ func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 }
 
-// JobRequest: 화면에서 선택한 명령과 옵션입니다.
+// JobRequest is the command and options chosen in the UI.
 type JobRequest struct {
 	Command   string  `json:"command"` // reduce | recolor | index | extract | downscale | upscale | trim | despeckle | slice | pack
 	Threshold float64 `json:"threshold"`
-	MaxColors int     `json:"maxColors"` // reduce: 0 이면 Threshold 사용, 1 이상이면 최대 색상 수 기준
+	MaxColors int     `json:"maxColors"` // reduce: 0 uses Threshold, 1 or more is based on the maximum number of colors
 	Scale     int     `json:"scale"`
 	FrameSize string  `json:"frameSize"`
-	OutDir    string  `json:"outDir"` // slice: 프레임 폴더, 그 외: 결과를 저장할 폴더 (비어 있으면 원본 옆)
+	OutDir    string  `json:"outDir"` // slice: frame folder; others: folder to save results in (next to the original if empty)
 	KeepEmpty bool    `json:"keepEmpty"`
 	Palette   string  `json:"palette"`
 	Suffix    string  `json:"suffix"`
 	InPlace   bool    `json:"inPlace"`
-	Backup    bool    `json:"backup"` // InPlace 일 때 덮어쓰기 전에 원본을 백업 폴더에 복사
+	Backup    bool    `json:"backup"` // with InPlace, copy the original to the backup folder before overwriting
 	Threads   int     `json:"threads"`
-	Pad       int     `json:"pad"`      // trim: 사방에 더할 투명 여백
-	SaveName  string  `json:"saveName"` // extract: 비어 있지 않으면 공용 팔레트 폴더에도 이 이름으로 저장
-	Force     bool    `json:"force"`    // extract: 같은 이름의 팔레트를 덮어쓰기
-	Cols      int     `json:"cols"`     // pack: 열 수 (0 = 자동)
-	Gap       int     `json:"gap"`      // pack: 칸 사이 간격
+	Pad       int     `json:"pad"`      // trim: transparent margin to add on every side
+	SaveName  string  `json:"saveName"` // extract: if non-empty, also save under this name in the shared palette folder
+	Force     bool    `json:"force"`    // extract: overwrite a palette with the same name
+	Cols      int     `json:"cols"`     // pack: number of columns (0 = auto)
+	Gap       int     `json:"gap"`      // pack: spacing between cells
 	Align     string  `json:"align"`    // pack: topleft | center
-	MinSize   int     `json:"minSize"`  // despeckle: 이보다 작은 조각을 지움
-	Diagonal  bool    `json:"diagonal"` // despeckle: 대각선도 이어진 것으로 봄
+	MinSize   int     `json:"minSize"`  // despeckle: erase pieces smaller than this
+	Diagonal  bool    `json:"diagonal"` // despeckle: treat diagonal neighbors as connected
 }
 
-// InputFile: 처리할 파일과, 그 파일을 찾은 루트 폴더(직접 고른 파일이면 빈 값)입니다.
+// InputFile is a file to process and the root folder it was found in (empty if the file was picked directly).
 type InputFile struct {
 	Path string `json:"path"`
 	Root string `json:"root"`
 }
 
-// PackResult: 시트 합치기 결과입니다. 저장 대화상자를 취소하면 Canceled 만 true 입니다.
+// PackResult is the result of packing a sheet. If the save dialog is canceled, only Canceled is true.
 type PackResult struct {
 	Canceled bool   `json:"canceled"`
 	Output   string `json:"output"`
 	Message  string `json:"message"`
 }
 
-// FileEntry: 목록에 표시할 입력 파일 정보입니다.
+// FileEntry is the input file information shown in the list.
 type FileEntry struct {
 	Path   string `json:"path"`
 	Name   string `json:"name"`
 	Dir    string `json:"dir"`
-	Root   string `json:"root"` // 폴더를 펼쳐 찾은 경우 그 폴더 (출력 폴더에서 하위 구조를 유지하는 데 사용)
+	Root   string `json:"root"` // the folder it was found in when a folder was expanded (used to keep the subtree structure in the output folder)
 	Width  int    `json:"width"`
 	Height int    `json:"height"`
 	Bytes  int64  `json:"bytes"`
 	Error  string `json:"error,omitempty"`
 }
 
-// PreviewResult: 미리보기 결과입니다. Image 는 PNG data URL 입니다.
+// PreviewResult is a preview result. Image is a PNG data URL.
 type PreviewResult struct {
 	Status  common.Status `json:"status"`
 	Message string        `json:"message"`
@@ -125,7 +125,7 @@ type PreviewResult struct {
 	Millis  int64         `json:"millis"`
 }
 
-// PaletteInfo: 팔레트 이름과 색상 목록입니다.
+// PaletteInfo is a palette name and its color list.
 type PaletteInfo struct {
 	Name   string   `json:"name"`
 	Path   string   `json:"path"`
@@ -143,14 +143,14 @@ var defaultSuffixes = map[string]string{
 	"extract":   "-palette",
 }
 
-// DefaultSuffix: 명령별 기본 출력 접미사를 반환합니다.
+// DefaultSuffix returns the default output suffix of each command.
 func (a *App) DefaultSuffix(command string) string {
 	return defaultSuffixes[command]
 }
 
-// ---------- 파일 ----------
+// ---------- Files ----------
 
-// ExpandPaths: 드롭하거나 선택한 파일·폴더를 PNG 파일 목록으로 펼칩니다.
+// ExpandPaths expands dropped or selected files and folders into a list of PNG files.
 func (a *App) ExpandPaths(paths []string, recursive bool) ([]FileEntry, error) {
 	o := common.Options{Roots: paths, Pattern: "*.png", Recursive: recursive, NoOutput: true}
 	o.ExcludeDirs = processor.PaletteDirs()
@@ -172,7 +172,7 @@ func (a *App) ExpandPaths(paths []string, recursive bool) ([]FileEntry, error) {
 	return entries, nil
 }
 
-// Describe: 파일 정보를 다시 읽습니다 (덮어쓰기 후 크기 갱신 등).
+// Describe re-reads file information (e.g. refreshing the size after an overwrite).
 func (a *App) Describe(paths []string) []FileEntry {
 	out := make([]FileEntry, len(paths))
 	for i, p := range paths {
@@ -227,7 +227,7 @@ func (a *App) PickPaletteFile() (string, error) {
 	})
 }
 
-// Reveal: 탐색기에서 파일(또는 폴더)을 선택한 상태로 엽니다.
+// Reveal opens the file (or folder) selected in the file explorer.
 func (a *App) Reveal(path string) error {
 	if st, err := os.Stat(path); err == nil && st.IsDir() {
 		return exec.Command("explorer", path).Start()
@@ -235,8 +235,8 @@ func (a *App) Reveal(path string) error {
 	return exec.Command("explorer", "/select,", path).Start()
 }
 
-// imageMiddleware: /local?path=... 로 로컬 PNG 를 화면에 제공합니다 (썸네일·원본 미리보기용).
-// 개발 모드의 프런트엔드 서버가 모든 경로에 응답하므로 핸들러가 아닌 미들웨어로 먼저 가로챕니다.
+// imageMiddleware serves a local PNG to the UI via /local?path=... (for thumbnails and original previews).
+// The dev-mode frontend server answers every path, so this intercepts it first as middleware rather than as a handler.
 func (a *App) imageMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/local" {
@@ -259,7 +259,7 @@ func (a *App) imageMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-// ---------- 작업 ----------
+// ---------- Jobs ----------
 
 func parseFrameSize(s string) (int, int, error) {
 	parts := strings.Split(strings.ToLower(strings.TrimSpace(s)), "x")
@@ -305,7 +305,7 @@ func (a *App) palette(spec string) (*loadedPalette, error) {
 	return p, nil
 }
 
-// imageFunc: 요청을 "이미지 → 이미지" 변환 함수로 바꿉니다 (slice 제외).
+// imageFunc turns a request into an "image -> image" transform function (except slice).
 func (a *App) imageFunc(req JobRequest) (func(image.Image) (image.Image, string, error), error) {
 	switch req.Command {
 	case "reduce":
@@ -367,8 +367,8 @@ func (a *App) imageFunc(req JobRequest) (func(image.Image) (image.Image, string,
 	return nil, i18n.Errorf("err.gui.unknown_command", req.Command)
 }
 
-// buildTask: 요청을 실행할 작업과 옵션으로 바꿉니다. produced 는 작업이 출력 경로를 직접 정하는 경우(slice)
-// 저장한 파일을 알려 주는 콜백이며 nil 이어도 됩니다 (여러 스레드에서 호출될 수 있음).
+// buildTask turns a request into the task and options to run. produced is a callback that reports saved files
+// when the task decides its own output paths (slice); it may be nil (it can be called from several threads).
 func (a *App) buildTask(req JobRequest, produced func(paths []string)) (common.Task, common.Options, error) {
 	o := common.Options{Threads: req.Threads}
 	if req.Command == "slice" {
@@ -392,7 +392,7 @@ func (a *App) buildTask(req JobRequest, produced func(paths []string)) (common.T
 	}
 	o.Suffix, o.InPlace, o.OutDir = req.Suffix, req.InPlace, strings.TrimSpace(req.OutDir)
 	if req.Command == "extract" {
-		o.InPlace = false // 팔레트 이미지로 원본을 덮어쓰면 안 됩니다.
+		o.InPlace = false // the original must not be overwritten with a palette image.
 	}
 	o.Backup = req.Backup && o.InPlace
 	if err := o.Validate(); err != nil {
@@ -429,7 +429,7 @@ func (a *App) buildTask(req JobRequest, produced func(paths []string)) (common.T
 	}, o, nil
 }
 
-// Run: 파일들을 백그라운드에서 처리합니다. 진행 상황은 "job:result", 완료는 "job:done" 이벤트로 전달됩니다.
+// Run processes the files in the background. Progress is delivered as "job:result" events and completion as "job:done".
 func (a *App) Run(req JobRequest, files []InputFile) error {
 	if len(files) == 0 {
 		return i18n.Errorf("err.gui.no_files")
@@ -438,7 +438,7 @@ func (a *App) Run(req JobRequest, files []InputFile) error {
 		return i18n.Errorf("err.gui.save_single", len(files))
 	}
 	var outMu sync.Mutex
-	var outputs []string // 이번 실행으로 새로 만들어진 파일 (덮어쓴 원본은 제외)
+	var outputs []string // files newly created by this run (excluding overwritten originals)
 	task, o, err := a.buildTask(req, func(paths []string) {
 		outMu.Lock()
 		outputs = append(outputs, paths...)
@@ -493,19 +493,19 @@ func (a *App) Run(req JobRequest, files []InputFile) error {
 	return nil
 }
 
-// BackupPair: 덮어쓴 원본 파일과, 덮어쓰기 전에 복사해 둔 백업 파일입니다.
+// BackupPair is an overwritten original file and the backup file copied before overwriting.
 type BackupPair struct {
 	Path   string `json:"path"`
 	Backup string `json:"backup"`
 }
 
-// RestoreReport: 백업 복원 결과입니다. Restored 는 되돌린 파일 수, Errors 는 실패한 파일별 사유입니다.
+// RestoreReport is the result of restoring backups. Restored is the number of files put back, Errors the reason for each failed file.
 type RestoreReport struct {
 	Restored int      `json:"restored"`
 	Errors   []string `json:"errors"`
 }
 
-// RestoreBackups: 백업해 둔 원본을 원래 위치로 되돌립니다. 작업이 진행 중일 때는 거부합니다.
+// RestoreBackups puts backed-up originals back in their original locations. It is refused while a job is running.
 func (a *App) RestoreBackups(pairs []BackupPair) (RestoreReport, error) {
 	a.mu.Lock()
 	busy := a.cancelJob != nil
@@ -528,7 +528,7 @@ func (a *App) RestoreBackups(pairs []BackupPair) (RestoreReport, error) {
 	return rep, nil
 }
 
-// Cancel: 진행 중인 작업을 멈춥니다. 이미 처리 중인 파일은 끝까지 처리됩니다.
+// Cancel stops the running job. A file already being processed is finished.
 func (a *App) Cancel() {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -537,9 +537,9 @@ func (a *App) Cancel() {
 	}
 }
 
-// ---------- 미리보기 ----------
+// ---------- Preview ----------
 
-// loadSource: 슬라이더를 움직일 때마다 디스크를 다시 읽지 않도록 최근 이미지를 캐시합니다.
+// loadSource caches the most recent image so the disk is not re-read every time a slider moves.
 func (a *App) loadSource(path string) (image.Image, error) {
 	st, err := os.Stat(path)
 	if err != nil {
@@ -570,7 +570,7 @@ func (a *App) loadSource(path string) (image.Image, error) {
 	return img, nil
 }
 
-// Preview: 파일을 저장하지 않고 처리 결과만 계산해 보여줍니다.
+// Preview computes and shows only the processed result, without saving files.
 func (a *App) Preview(req JobRequest, path string) PreviewResult {
 	start := time.Now()
 	res := a.preview(req, path)
@@ -634,7 +634,7 @@ func (a *App) preview(req JobRequest, path string) PreviewResult {
 	return res
 }
 
-// swatchStrip: 1px 짜리 팔레트 한 줄을 색마다 정사각형 칸으로 키워 한눈에 볼 수 있게 합니다 (한 줄에 최대 16색).
+// swatchStrip enlarges a 1px palette row into a square cell per color so it can be seen at a glance (at most 16 colors per row).
 func swatchStrip(pal image.Image) image.Image {
 	n := common.ToNRGBA(pal)
 	count := n.Rect.Dx()
@@ -654,7 +654,7 @@ func swatchStrip(pal image.Image) image.Image {
 	return dst
 }
 
-// contactSheet: 잘라낸 프레임을 원래 위치에 간격을 두고 배치해 자르기 결과를 한눈에 보여줍니다.
+// contactSheet places the cut-out frames at their original positions with gaps, to show the slice result at a glance.
 func contactSheet(frames []processor.Frame, src image.Rectangle, fw, fh int) image.Image {
 	gap := max(1, min(fw, fh)/8)
 	cols, rows := src.Dx()/fw, src.Dy()/fh
@@ -668,7 +668,7 @@ func contactSheet(frames []processor.Frame, src image.Rectangle, fw, fh int) ima
 	return sheet
 }
 
-// uniqueColors: 이미지에 쓰인 불투명 색상을 사용 빈도순 hex 로 반환합니다. limit 를 넘으면 nil.
+// uniqueColors returns the opaque colors used in the image as hex, ordered by frequency. Returns nil if there are more than limit.
 func uniqueColors(img image.Image, limit int) []string {
 	counts := make(map[color.NRGBA]int)
 	b := img.Bounds()
@@ -710,7 +710,7 @@ func hex(c color.NRGBA) string {
 	return fmt.Sprintf("#%02x%02x%02x", c.R, c.G, c.B)
 }
 
-// ---------- 시트 합치기 ----------
+// ---------- Packing sheets ----------
 
 func packSheet(req JobRequest, paths []string) (*image.NRGBA, string, error) {
 	if len(paths) == 0 {
@@ -723,7 +723,7 @@ func packSheet(req JobRequest, paths []string) (*image.NRGBA, string, error) {
 	return processor.PackSheet(images, req.Cols, req.Gap, req.Align == "center")
 }
 
-// PreviewPack: 목록의 파일을 자연 정렬 순서로 합친 시트를 저장하지 않고 미리 보여줍니다.
+// PreviewPack previews, without saving, the sheet made by merging the listed files in natural sort order.
 func (a *App) PreviewPack(req JobRequest, paths []string) PreviewResult {
 	start := time.Now()
 	sheet, msg, err := packSheet(req, paths)
@@ -744,8 +744,8 @@ func (a *App) PreviewPack(req JobRequest, paths []string) PreviewResult {
 	}
 }
 
-// RunPack: 저장 위치를 물어본 뒤 파일들을 한 장의 시트로 합쳐 저장합니다.
-// 저장 대화상자가 덮어쓰기 여부를 확인하므로 기존 파일은 덮어쓰되, 입력 파일을 덮어쓰는 경로는 거부합니다.
+// RunPack asks for a save location, then merges the files into one sheet and saves it.
+// The save dialog confirms overwriting, so an existing file is overwritten, but a path that would overwrite an input file is rejected.
 func (a *App) RunPack(req JobRequest, paths []string) (PackResult, error) {
 	if len(paths) == 0 {
 		return PackResult{}, i18n.Errorf("err.gui.pack_none")
@@ -777,9 +777,9 @@ func (a *App) RunPack(req JobRequest, paths []string) (PackResult, error) {
 	return PackResult{Output: out, Message: msg}, nil
 }
 
-// ---------- 팔레트 ----------
+// ---------- Palettes ----------
 
-// forgetPalette: 같은 이름으로 팔레트를 다시 저장했을 때 캐시된 색상이 남지 않게 지웁니다.
+// forgetPalette clears the cached colors when a palette is saved again under the same name.
 func (a *App) forgetPalette(name string) {
 	name = strings.ToLower(strings.TrimSpace(name))
 	a.palMu.Lock()
@@ -787,7 +787,7 @@ func (a *App) forgetPalette(name string) {
 	delete(a.palettes, name)
 }
 
-// ListPalettes: 로컬에 저장된 팔레트 목록을 색상과 함께 반환합니다.
+// ListPalettes returns the locally saved palettes along with their colors.
 func (a *App) ListPalettes() ([]PaletteInfo, error) {
 	names, err := processor.ListLocalPalettes()
 	if err != nil {
@@ -802,7 +802,7 @@ func (a *App) ListPalettes() ([]PaletteInfo, error) {
 	return list, nil
 }
 
-// LoadPalette: 팔레트 이름(Lospec, 필요하면 다운로드) 또는 PNG 경로로 팔레트를 불러옵니다.
+// LoadPalette loads a palette by palette name (Lospec, downloaded if needed) or by PNG path.
 func (a *App) LoadPalette(spec string) (PaletteInfo, error) {
 	p, err := a.palette(spec)
 	if err != nil {
@@ -815,7 +815,7 @@ func (a *App) LoadPalette(spec string) (PaletteInfo, error) {
 	return info, nil
 }
 
-// PalettesDir: 팔레트 캐시 폴더 경로입니다.
+// PalettesDir is the path of the palette cache folder.
 func (a *App) PalettesDir() string {
 	dir, _ := processor.EnsurePalettesDirExists()
 	return dir

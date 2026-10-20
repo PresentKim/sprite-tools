@@ -14,14 +14,14 @@ import (
 	"sprite-tools/pkg/i18n"
 )
 
-// PackImages: 이미지들을 한 장의 스프라이트 시트로 합칩니다 (slice 의 반대).
-// 칸 크기는 가장 큰 너비 x 가장 큰 높이이고 작은 이미지는 칸의 왼쪽 위에 놓입니다.
-// cols 가 0 이하면 ceil(sqrt(개수)) 열, gap 은 칸 사이의 투명 간격(px)입니다.
+// PackImages combines images into a single sprite sheet (the opposite of slice).
+// The cell size is the largest width x largest height, and smaller images are placed at the top-left of a cell.
+// If cols is 0 or less, ceil(sqrt(count)) columns are used; gap is the transparent spacing (px) between cells.
 func PackImages(images []image.Image, cols, gap int) (*image.NRGBA, string, error) {
 	return PackSheet(images, cols, gap, false)
 }
 
-// PackSheet: PackImages 와 같지만 center 가 true 면 작은 이미지를 칸의 가운데에 놓습니다.
+// PackSheet is like PackImages but places smaller images at the center of a cell when center is true.
 func PackSheet(images []image.Image, cols, gap int, center bool) (*image.NRGBA, string, error) {
 	if len(images) == 0 {
 		return nil, "", i18n.Errorf("err.pack.no_images")
@@ -72,14 +72,14 @@ func PackSheet(images []image.Image, cols, gap int, center bool) (*image.NRGBA, 
 	return dst, msg, nil
 }
 
-// SortedPaths: 경로 목록을 자연 정렬(frame-2 < frame-10)한 복사본을 반환합니다.
+// SortedPaths returns a copy of the path list in natural order (frame-2 < frame-10).
 func SortedPaths(paths []string) []string {
 	sorted := slices.Clone(paths)
 	common.NaturalSort(sorted)
 	return sorted
 }
 
-// LoadImages: PNG 파일들을 순서대로 읽습니다. 하나라도 실패하면 어느 파일인지 알려 줍니다.
+// LoadImages reads PNG files in order. If any fails, it reports which file.
 func LoadImages(paths []string) ([]image.Image, error) {
 	images := make([]image.Image, len(paths))
 	for i, p := range paths {
@@ -92,11 +92,11 @@ func LoadImages(paths []string) ([]image.Image, error) {
 	return images, nil
 }
 
-// ErrOutputExists: 출력 파일이 이미 있고 덮어쓰기가 허용되지 않았을 때 반환됩니다. (errors.Is 용 표식이며 사용자에게는 현지화된 메시지가 보입니다)
+// ErrOutputExists is returned when the output file already exists and overwriting is not allowed. (It is a marker for errors.Is; users see a localized message)
 var ErrOutputExists = errors.New("output file already exists")
 
-// CheckPackOutput: 시트 출력 경로가 안전한지 확인합니다.
-// 입력 파일을 덮어쓰는 경로는 항상 거부하고, 이미 있는 다른 파일은 force 가 아니면 ErrOutputExists 로 거부합니다.
+// CheckPackOutput checks that the sheet output path is safe.
+// A path that would overwrite an input file is always rejected, and any other existing file is rejected with ErrOutputExists unless force is set.
 func CheckPackOutput(inputs []string, outPath string, force bool) error {
 	if !strings.EqualFold(filepath.Ext(outPath), ".png") {
 		return i18n.Errorf("err.pack.not_png", outPath)
@@ -121,7 +121,7 @@ func CheckPackOutput(inputs []string, outPath string, force bool) error {
 	return nil
 }
 
-// PackFiles: PNG 파일들을 자연 정렬 순서로 한 장의 시트로 합쳐 outPath 에 저장합니다.
+// PackFiles merges PNG files into one sheet in natural sort order and saves it to outPath.
 func PackFiles(paths []string, outPath string, cols, gap int, center, force bool) (string, error) {
 	if err := CheckPackOutput(paths, outPath, force); err != nil {
 		return "", err

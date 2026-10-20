@@ -26,15 +26,15 @@ const (
 
 type command struct {
 	name    string
-	aliases []string // 짧은 별칭
-	legacy  []string // 이전 이름 (호환용, 도움말에는 표시하지 않음)
+	aliases []string // short aliases
+	legacy  []string // former names (kept for compatibility, not shown in help)
 	run     func(args []string) int
 }
 
-// 명령 설명은 i18n 카탈로그(cmd.<이름>.summary / usage / details)에 있으며, 호출 시점의 언어로 읽습니다.
-func (c *command) summary() string { return i18n.T("cmd." + c.name + ".summary") } // 한 줄 설명
-func (c *command) usage() string   { return i18n.T("cmd." + c.name + ".usage") }   // 인자 형식
-func (c *command) details() string { return i18n.T("cmd." + c.name + ".details") } // 설명 및 예시
+// Command descriptions live in the i18n catalog (cmd.<name>.summary / usage / details) and are read in the language active at call time.
+func (c *command) summary() string { return i18n.T("cmd." + c.name + ".summary") } // one-line description
+func (c *command) usage() string   { return i18n.T("cmd." + c.name + ".usage") }   // argument format
+func (c *command) details() string { return i18n.T("cmd." + c.name + ".details") } // description and examples
 
 var commands []command
 
@@ -57,10 +57,10 @@ func main() {
 	os.Exit(run(os.Args[1:]))
 }
 
-// langEnv: 표시 언어를 지정하는 환경 변수입니다 (--lang 이 우선합니다).
+// langEnv is the environment variable that selects the display language (--lang takes precedence).
 const langEnv = "SPRITE_TOOLS_LANG"
 
-// langList: "en, ko" 처럼 사용할 수 있는 언어 코드 목록 문자열입니다. (언어 이름은 각 언어 그대로라 영어 출력에 한글이 섞이지 않도록 코드만 보여 줍니다)
+// langList is a string of the available language codes, such as "en, ko". Only codes are shown so that native language names do not mix Hangul into English output.
 func langList() string {
 	var codes []string
 	for _, l := range i18n.Languages() {
@@ -69,7 +69,7 @@ func langList() string {
 	return strings.Join(codes, ", ")
 }
 
-// extractLang: 명령 이름 앞뒤 어디에 있든 --lang <코드> / -lang <코드> / --lang=<코드> 를 인자에서 빼냅니다. "--" 이후는 건드리지 않습니다.
+// extractLang removes --lang <code> / -lang <code> / --lang=<code> from the arguments wherever it appears around the command name. Anything after "--" is left alone.
 func extractLang(args []string) (rest []string, lang string, given bool, err error) {
 	for i := 0; i < len(args); i++ {
 		a := args[i]
@@ -94,8 +94,8 @@ func extractLang(args []string) (rest []string, lang string, given bool, err err
 	return rest, lang, given, nil
 }
 
-// setupLanguage: 언어를 --lang > SPRITE_TOOLS_LANG > 기본값(en) 순서로 정하고, 플래그를 뺀 인자를 돌려줍니다.
-// 플래그 도움말은 플래그를 만들 때 문자열로 고정되므로, 반드시 플래그 세트를 만들기 전에 호출해야 합니다.
+// setupLanguage picks the language in the order --lang > SPRITE_TOOLS_LANG > default (en) and returns the arguments without the flag.
+// Flag help text is fixed when the flags are created, so this must be called before building the flag set.
 func setupLanguage(args []string) ([]string, error) {
 	_ = i18n.SetLanguage(i18n.DefaultLanguage)
 	rest, lang, given, err := extractLang(args)
@@ -156,8 +156,8 @@ func run(args []string) int {
 	return cmd.run(args[1:])
 }
 
-// resolveCommand: 정식 이름, 별칭, 이전 이름, 겹치지 않는 앞부분(예: "red")으로 명령을 찾습니다.
-// 찾지 못했고 앞부분이 여러 명령과 겹치면 후보 목록을 함께 반환합니다.
+// resolveCommand finds a command by canonical name, alias, former name, or a non-ambiguous prefix (e.g. "red").
+// If nothing is found and the prefix matches several commands, the candidates are returned as well.
 func resolveCommand(name string) (*command, []string) {
 	name = strings.ToLower(name)
 	if name == "" {
@@ -183,7 +183,7 @@ func resolveCommand(name string) (*command, []string) {
 	return nil, names
 }
 
-// suggest: 오타로 보이는 명령에 대해 가장 비슷한 명령을 추천합니다.
+// suggest recommends the most similar command for a likely typo.
 func suggest(name string) string {
 	best, bestDist := "", 3
 	for _, c := range commands {
@@ -255,7 +255,7 @@ func newFlagSet(name string) (*flag.FlagSet, *command) {
 	return fs, cmd
 }
 
-// batchFlags: 여러 파일을 처리하는 명령에 공통으로 쓰이는 옵션입니다.
+// batchFlags are the options shared by commands that process multiple files.
 type batchFlags struct {
 	pattern   *string
 	suffix    *string
@@ -267,13 +267,13 @@ type batchFlags struct {
 	backup    *bool
 }
 
-// outputMode: 명령이 결과 파일을 만드는 방식입니다.
+// outputMode is how a command produces its result files.
 type outputMode int
 
 const (
-	modeNoOutput        outputMode = iota // 작업이 출력 경로를 직접 결정함 (slice, pack)
-	modeOutput                            // 접미사/-w/-o 모두 사용
-	modeOutputNoInPlace                   // 원본을 덮어쓸 수 없음 (extract)
+	modeNoOutput        outputMode = iota // the job decides its own output paths (slice, pack)
+	modeOutput                            // suffix/-w/-o all apply
+	modeOutputNoInPlace                   // the original cannot be overwritten (extract)
 )
 
 func addBatchFlags(fs *flag.FlagSet, defaultSuffix string, mode outputMode) *batchFlags {
@@ -310,12 +310,12 @@ func (b *batchFlags) options(roots []string) common.Options {
 			o.Backup = *b.backup
 		}
 	}
-	// 캐시된 팔레트 이미지가 작업 대상에 섞이지 않도록 제외합니다.
+	// Exclude cached palette images so they are not mixed into the work targets.
 	o.ExcludeDirs = append(o.ExcludeDirs, processor.PaletteDirs()...)
 	return o
 }
 
-// parseArgs: 플래그와 경로를 순서에 상관없이 섞어 쓸 수 있도록 파싱합니다.
+// parseArgs parses flags and paths so that they can be mixed in any order.
 func parseArgs(fs *flag.FlagSet, args []string) ([]string, error) {
 	var positional []string
 	for {
@@ -430,7 +430,7 @@ func execute(b *batchFlags, roots []string, task common.Task) int {
 	return exitOK
 }
 
-// usageError: 카탈로그 키(err.cli.*)로 만든 오류와 함께 사용법을 보여 줍니다.
+// usageError shows the usage together with an error built from a catalog key (err.cli.*).
 func usageError(fs *flag.FlagSet, key string, a ...any) int {
 	fmt.Fprintf(os.Stderr, "%s\n\n", i18n.T("cli.error", i18n.T(key, a...)))
 	fs.Usage()
@@ -488,7 +488,7 @@ func runIndex(args []string) int {
 	return execute(b, roots, processor.Index)
 }
 
-// parseSize: "16" 또는 "16x24" 형식의 프레임 크기를 해석합니다.
+// parseSize parses a frame size in the form "16" or "16x24".
 func parseSize(s string) (int, int, error) {
 	parts := strings.Split(strings.ToLower(s), "x")
 	if len(parts) > 2 {
