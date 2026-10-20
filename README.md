@@ -11,6 +11,12 @@ sprite-tools help
 
 `gui/` 폴더에 [Wails](https://wails.io) 기반 데스크톱 앱이 있습니다.
 
+| 일괄 처리 | 편집기 |
+| --- | --- |
+| ![일괄 처리 - 색상 줄이기](docs/screenshots/batch-reduce.png) | ![편집기](docs/screenshots/editor.png) |
+
+![일괄 처리 - 시트 합치기](docs/screenshots/batch-pack.png)
+
 ```
 cd gui
 wails build        # → gui/build/bin/sprite-tools-gui.exe
