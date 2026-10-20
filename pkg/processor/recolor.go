@@ -190,38 +190,42 @@ func Recolor(inputPath, outputPath string, paletteColors []color.NRGBA, paletteO
 // 원본 픽셀의 알파 값은 그대로 유지합니다.
 func RecolorImage(src image.Image, paletteColors []color.NRGBA, paletteOKLabs []common.OKLab) (image.Image, string, error) {
 	bounds := src.Bounds()
+	n := common.ToNRGBA(src)
 	dst := image.NewNRGBA(bounds)
-	colorCache := make(map[color.Color]color.NRGBA)
+	colorCache := make(map[uint32]color.NRGBA)
 	changed := 0
 
-	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
-		for x := bounds.Min.X; x < bounds.Max.X; x++ {
-			c := src.At(x, y)
-			alpha := common.Alpha8(c)
-			if alpha == 0 {
-				continue
-			}
-
-			matched, ok := colorCache[c]
+	lastKey, hasLast := uint32(0), false
+	var lastMatched color.NRGBA
+	for i := 0; i < len(n.Pix); i += 4 {
+		p := n.Pix[i : i+4 : i+4]
+		alpha := p[3]
+		if alpha == 0 {
+			continue
+		}
+		key := common.PackNRGBA(p[0], p[1], p[2], alpha)
+		if !hasLast || key != lastKey {
+			matched, ok := colorCache[key]
 			if !ok {
-				pixelOKLab := common.ColorToOKLab(c)
+				pixelOKLab := common.PackedToOKLab(key)
 				minDist := math.MaxFloat64
 				best := 0
-				for i, pOKLab := range paletteOKLabs {
+				for j, pOKLab := range paletteOKLabs {
 					if dist := common.DeltaOKLabWeighted(pixelOKLab, pOKLab); dist < minDist {
 						minDist = dist
-						best = i
+						best = j
 					}
 				}
 				matched = paletteColors[best]
 				matched.A = alpha
-				colorCache[c] = matched
-				if color.NRGBAModel.Convert(c) != matched {
+				colorCache[key] = matched
+				if (color.NRGBA{p[0], p[1], p[2], alpha}) != matched {
 					changed++
 				}
 			}
-			dst.SetNRGBA(x, y, matched)
+			lastKey, lastMatched, hasLast = key, matched, true
 		}
+		dst.Pix[i], dst.Pix[i+1], dst.Pix[i+2], dst.Pix[i+3] = lastMatched.R, lastMatched.G, lastMatched.B, lastMatched.A
 	}
 
 	return dst, fmt.Sprintf("원본 색상 %d개 중 %d개 교체", len(colorCache), changed), nil

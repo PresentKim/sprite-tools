@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"image"
+	"image/draw"
 	"image/png"
 	"os"
 	"path/filepath"
@@ -52,4 +53,33 @@ func WriteFileAtomic(path string, data []byte) error {
 		return err
 	}
 	return nil
+}
+
+// ToNRGBA: 이미지를 경계가 (0,0)에서 시작하는 *image.NRGBA 로 바꿉니다.
+// 이미 그런 NRGBA 면 복사 없이 그대로 돌려주므로, 결과를 수정하면 원본도 바뀝니다(읽기 전용으로 쓰세요).
+// 반환값은 항상 행 사이 여백이 없는(Stride == 4*너비) 형태라 Pix 를 픽셀 순서대로 바로 훑을 수 있습니다.
+func ToNRGBA(img image.Image) *image.NRGBA {
+	if n, ok := img.(*image.NRGBA); ok && n.Rect.Min == (image.Point{}) && n.Stride == 4*n.Rect.Dx() {
+		return n
+	}
+	b := img.Bounds()
+	dst := image.NewNRGBA(image.Rect(0, 0, b.Dx(), b.Dy()))
+	draw.Draw(dst, dst.Bounds(), img, b.Min, draw.Src)
+	return dst
+}
+
+// PackNRGBA: 8비트 NRGBA 값을 맵 키로 쓸 수 있는 uint32 하나로 묶습니다.
+func PackNRGBA(r, g, b, a uint8) uint32 {
+	return uint32(r)<<24 | uint32(g)<<16 | uint32(b)<<8 | uint32(a)
+}
+
+// UnpackNRGBA: PackNRGBA 의 역변환입니다.
+func UnpackNRGBA(k uint32) (r, g, b, a uint8) {
+	return uint8(k >> 24), uint8(k >> 16), uint8(k >> 8), uint8(k)
+}
+
+// PackedToOKLab: 묶인 NRGBA 값을 OKLab 으로 변환합니다(알파 제외, ColorToOKLab 과 같은 결과).
+func PackedToOKLab(k uint32) OKLab {
+	r, g, b, _ := UnpackNRGBA(k)
+	return RGBToOKLab(uint32(r)<<8, uint32(g)<<8, uint32(b)<<8)
 }

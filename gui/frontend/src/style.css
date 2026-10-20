@@ -101,6 +101,9 @@ p { margin: 0; }
 .options .panel-scroll { flex: 1; overflow: auto; padding: 16px; display: flex; flex-direction: column; gap: 18px; }
 .group { display: flex; flex-direction: column; gap: 8px; }
 .group[hidden] { display: none; }
+#reduce-threshold, #reduce-count { display: flex; flex-direction: column; gap: 8px; }
+#reduce-threshold[hidden], #reduce-count[hidden] { display: none; }
+#reduce-mode { align-self: flex-start; }
 details.group summary { cursor: pointer; color: var(--muted); font-weight: 600; font-size: 12px; }
 details.group[open] summary { margin-bottom: 4px; }
 .field-label { font-weight: 600; display: flex; justify-content: space-between; }

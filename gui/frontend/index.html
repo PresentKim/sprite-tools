@@ -25,9 +25,20 @@
           </section>
 
           <section class="group" id="opts-reduce" data-cmd="reduce">
+            <div class="seg" id="reduce-mode">
+              <button type="button" data-mode="threshold">병합 강도</button>
+              <button type="button" data-mode="count">최대 색상 수</button>
+            </div>
+            <div id="reduce-threshold">
             <label class="field-label" for="threshold">병합 강도 <span class="value" id="threshold-value"></span></label>
             <input type="range" id="threshold" min="0.005" max="0.3" step="0.005" />
             <div class="range-hint"><span>원본 유지</span><span>더 많이 합침</span></div>
+            </div>
+            <div id="reduce-count">
+              <label class="field-label" for="max-colors">최대 색상 수</label>
+              <input type="number" id="max-colors" min="1" max="256" step="1" />
+              <p class="muted small">이 수 이하가 되는 가장 약한 병합 강도를 자동으로 찾습니다. 투명 색은 세지 않습니다.</p>
+            </div>
           </section>
 
           <section class="group" id="opts-slice" data-cmd="slice">

@@ -27,6 +27,7 @@ export namespace main {
 	export class JobRequest {
 	    command: string;
 	    threshold: number;
+	    maxColors: number;
 	    scale: number;
 	    frameSize: string;
 	    outDir: string;
@@ -44,6 +45,7 @@ export namespace main {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.command = source["command"];
 	        this.threshold = source["threshold"];
+	        this.maxColors = source["maxColors"];
 	        this.scale = source["scale"];
 	        this.frameSize = source["frameSize"];
 	        this.outDir = source["outDir"];

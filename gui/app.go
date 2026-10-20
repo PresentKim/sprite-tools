@@ -66,6 +66,7 @@ func (a *App) startup(ctx context.Context) {
 type JobRequest struct {
 	Command   string  `json:"command"` // reduce | slice | downscale | index | recolor
 	Threshold float64 `json:"threshold"`
+	MaxColors int     `json:"maxColors"` // reduce: 0 이면 Threshold 사용, 1 이상이면 최대 색상 수 기준
 	Scale     int     `json:"scale"`
 	FrameSize string  `json:"frameSize"`
 	OutDir    string  `json:"outDir"`
@@ -270,6 +271,14 @@ func (a *App) palette(spec string) (*loadedPalette, error) {
 func (a *App) imageFunc(req JobRequest) (func(image.Image) (image.Image, string, error), error) {
 	switch req.Command {
 	case "reduce":
+		if req.MaxColors < 0 {
+			return nil, errors.New("최대 색상 수는 1 이상이어야 합니다")
+		}
+		if req.MaxColors > 0 {
+			return func(src image.Image) (image.Image, string, error) {
+				return processor.ReduceToCount(src, req.MaxColors)
+			}, nil
+		}
 		if req.Threshold <= 0 {
 			return nil, errors.New("병합 강도는 0보다 커야 합니다")
 		}

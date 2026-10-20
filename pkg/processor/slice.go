@@ -3,7 +3,6 @@ package processor
 import (
 	"fmt"
 	"image"
-	"image/draw"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,16 +10,27 @@ import (
 	"sprite-tools/pkg/common"
 )
 
-func isFrameEmpty(img image.Image, rect image.Rectangle) bool {
+// isFrameEmpty: rect 영역(img 좌표계)의 알파가 모두 0 인지 확인합니다.
+func isFrameEmpty(img *image.NRGBA, rect image.Rectangle) bool {
 	for y := rect.Min.Y; y < rect.Max.Y; y++ {
-		for x := rect.Min.X; x < rect.Max.X; x++ {
-			_, _, _, a := img.At(x, y).RGBA()
-			if a > 0 {
+		row := img.Pix[img.PixOffset(rect.Min.X, y):img.PixOffset(rect.Max.X, y)]
+		for i := 3; i < len(row); i += 4 {
+			if row[i] != 0 {
 				return false
 			}
 		}
 	}
 	return true
+}
+
+// copyFrame: rect 영역을 (0,0) 에서 시작하는 새 NRGBA 로 복사합니다.
+func copyFrame(img *image.NRGBA, rect image.Rectangle) *image.NRGBA {
+	dst := image.NewNRGBA(image.Rect(0, 0, rect.Dx(), rect.Dy()))
+	for y := 0; y < rect.Dy(); y++ {
+		off := img.PixOffset(rect.Min.X, rect.Min.Y+y)
+		copy(dst.Pix[y*dst.Stride:(y+1)*dst.Stride], img.Pix[off:off+rect.Dx()*4])
+	}
+	return dst
 }
 
 // Frame: 잘라낸 프레임 하나와 시트에서의 위치입니다.
@@ -39,20 +49,18 @@ func SliceImage(src image.Image, frameW, frameH int, keepEmpty bool) ([]Frame, s
 		return nil, "", common.Skip("이미지 %dx%d 가 프레임 %dx%d 보다 작음", bounds.Dx(), bounds.Dy(), frameW, frameH)
 	}
 
+	n := common.ToNRGBA(src)
 	cols, rows := bounds.Dx()/frameW, bounds.Dy()/frameH
 	var frames []Frame
 	empty := 0
 	for row := 0; row < rows; row++ {
 		for col := 0; col < cols; col++ {
-			origin := bounds.Min.Add(image.Pt(col*frameW, row*frameH))
-			rect := image.Rectangle{Min: origin, Max: origin.Add(image.Pt(frameW, frameH))}
-			if !keepEmpty && isFrameEmpty(src, rect) {
+			rect := image.Rect(col*frameW, row*frameH, (col+1)*frameW, (row+1)*frameH)
+			if !keepEmpty && isFrameEmpty(n, rect) {
 				empty++
 				continue
 			}
-			dst := image.NewNRGBA(image.Rect(0, 0, frameW, frameH))
-			draw.Draw(dst, dst.Bounds(), src, rect.Min, draw.Src)
-			frames = append(frames, Frame{dst, col, row})
+			frames = append(frames, Frame{copyFrame(n, rect), col, row})
 		}
 	}
 

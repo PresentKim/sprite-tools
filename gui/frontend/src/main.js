@@ -30,6 +30,8 @@ const el = (tag, cls, text) => {
 const defaults = {
   command: 'reduce',
   threshold: 0.05,
+  reduceMode: 'threshold', // threshold | count
+  maxColors: 16,
   frameSize: '16',
   keepEmpty: false,
   outDir: '',
@@ -70,6 +72,7 @@ function request() {
   return {
     command: cmd,
     threshold: Number(settings.threshold),
+    maxColors: settings.reduceMode === 'count' ? Math.round(Number(settings.maxColors)) || 16 : 0,
     scale: Number(settings.scale),
     frameSize: settings.frameSize,
     outDir: settings.outDir,
@@ -135,6 +138,25 @@ function initOptions() {
   const showTh = () => { $('threshold-value').textContent = Number(settings.threshold).toFixed(3); };
   showTh();
   th.oninput = () => { settings.threshold = Number(th.value); showTh(); saveSettings(); schedulePreview(); };
+
+  const mc = $('max-colors');
+  mc.value = settings.maxColors;
+  const showMode = () => {
+    $('reduce-threshold').hidden = settings.reduceMode !== 'threshold';
+    $('reduce-count').hidden = settings.reduceMode !== 'count';
+    $('reduce-mode').querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.mode === settings.reduceMode));
+  };
+  showMode();
+  $('reduce-mode').querySelectorAll('button').forEach((b) => {
+    b.onclick = () => { settings.reduceMode = b.dataset.mode; showMode(); saveSettings(); schedulePreview(); };
+  });
+  mc.oninput = () => {
+    const v = Math.round(Number(mc.value));
+    if (!(v >= 1)) return; // 입력 중인 빈 값은 무시
+    settings.maxColors = Math.min(256, v);
+    saveSettings();
+    schedulePreview();
+  };
 
   const fs = $('frame-size');
   fs.value = settings.frameSize;

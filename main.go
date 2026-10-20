@@ -39,10 +39,12 @@ func init() {
 	commands = []command{
 		{"reduce", []string{"rd"}, []string{"simplify"}, "비슷한 색상을 합쳐 색상 수를 줄입니다 (OKLab 기준)", "[경로...] [옵션]",
 			`많이 쓰인 색상부터 대표 색상으로 잡고, 거리가 -t 미만인 색상을 대표 색상으로 합칩니다.
+-k 로 최대 색상 수를 주면 그 수 이하가 되는 가장 약한 기준을 자동으로 찾습니다(-t 무시).
 
 예시:
   sprite-tools reduce                        현재 폴더의 *.png → *-reduced.png
   sprite-tools rd hero.png -t 0.08           더 과감하게 합치기
+  sprite-tools rd hero.png -k 16             색상을 16개 이하로 줄이기
   sprite-tools rd assets -r -w               assets 하위 전체를 원본에 덮어쓰기`, runReduce},
 		{"slice", []string{"sl"}, []string{"split"}, "스프라이트 시트를 프레임 단위로 자릅니다", "[경로...] [옵션]",
 			`<이름>-0001.png, <이름>-0002.png ... 로 저장합니다. 완전히 투명한 프레임은 건너뜁니다.
@@ -343,10 +345,19 @@ func usageError(fs *flag.FlagSet, format string, a ...any) int {
 func runReduce(args []string) int {
 	fs, _ := newFlagSet("reduce")
 	threshold := fs.Float64("t", 0.05, "색상 병합 기준 거리 (클수록 더 많이 합침, 권장 0.02~0.15)")
+	maxColors := fs.Int("k", 0, "최대 색상 수 (0 = 사용 안 함, 지정하면 -t 대신 이 수 이하가 되도록 자동 조절)")
 	b := addBatchFlags(fs, "-reduced", true)
 	roots, code, ok := parseOrExit(fs, args)
 	if !ok {
 		return code
+	}
+	if *maxColors < 0 {
+		return usageError(fs, "-k 는 0 이상이어야 합니다")
+	}
+	if *maxColors > 0 {
+		return execute(b, roots, func(in, out string) (string, error) {
+			return processor.ReduceMax(in, out, *maxColors)
+		})
 	}
 	if *threshold <= 0 {
 		return usageError(fs, "-t 는 0보다 커야 합니다")

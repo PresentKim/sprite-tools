@@ -120,3 +120,62 @@ func TestSlice(t *testing.T) {
 		t.Fatal("empty frame should be skipped")
 	}
 }
+
+func TestReduceToCount(t *testing.T) {
+	src := goldenNRGBA(64, 48)
+	for _, max := range []int{1, 4, 8, 16} {
+		dst, msg, err := ReduceToCount(src, max)
+		if err != nil {
+			t.Fatalf("max %d: %v", max, err)
+		}
+		colors := map[color.NRGBA]bool{}
+		out := dst.(*image.NRGBA)
+		for i := 0; i < len(out.Pix); i += 4 {
+			if out.Pix[i+3] != 0 {
+				colors[color.NRGBA{out.Pix[i], out.Pix[i+1], out.Pix[i+2], out.Pix[i+3]}] = true
+			}
+		}
+		if len(colors) > max {
+			t.Errorf("max %d: 색상 %d개 (%s)", max, len(colors), msg)
+		}
+	}
+}
+
+func TestReduceToCountSkip(t *testing.T) {
+	src := goldenNRGBA(64, 48) // 불투명 색상 28개
+	if _, _, err := ReduceToCount(src, 28); !common.IsSkip(err) {
+		t.Fatalf("이미 충분히 적으면 Skip 이어야 함: %v", err)
+	}
+	if _, _, err := ReduceToCount(src, 0); err == nil {
+		t.Fatal("0 은 오류여야 함")
+	}
+}
+
+// 원점에서 시작하지만 행 간격(Stride)이 너비보다 큰 부분 이미지도 촘촘한 이미지와 같은 결과를 내야 합니다.
+func TestOriginSubImageStride(t *testing.T) {
+	wide := image.NewNRGBA(image.Rect(0, 0, 16, 4))
+	for y := 0; y < 4; y++ {
+		for x := 0; x < 16; x++ {
+			wide.Set(x, y, color.NRGBA{uint8(x * 15), uint8(y * 60), 7, 255})
+		}
+	}
+	sub := wide.SubImage(image.Rect(0, 0, 8, 4)).(*image.NRGBA)
+	compact := image.NewNRGBA(image.Rect(0, 0, 8, 4))
+	for y := 0; y < 4; y++ {
+		for x := 0; x < 8; x++ {
+			compact.Set(x, y, sub.At(x, y))
+		}
+	}
+	got, _, err1 := IndexImage(sub)
+	want, _, err2 := IndexImage(compact)
+	if err1 != nil || err2 != nil {
+		t.Fatal(err1, err2)
+	}
+	for y := 0; y < 4; y++ {
+		for x := 0; x < 8; x++ {
+			if got.At(x, y) != want.At(x, y) {
+				t.Fatalf("(%d,%d): %v != %v", x, y, got.At(x, y), want.At(x, y))
+			}
+		}
+	}
+}
