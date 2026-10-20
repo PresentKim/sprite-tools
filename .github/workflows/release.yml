@@ -1,0 +1,56 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: go test
+        run: go test ./...
+
+      - name: Build CLI
+        run: go build -o sprite-tools.exe .
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: gui/frontend/package-lock.json
+
+      - name: Install Wails CLI
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.11.0
+
+      - name: Build GUI
+        working-directory: gui
+        run: wails build
+
+      - name: Package
+        run: |
+          dir="sprite-tools-${GITHUB_REF_NAME}-windows-amd64"
+          mkdir "$dir"
+          cp sprite-tools.exe "$dir/"
+          cp gui/build/bin/sprite-tools-gui.exe "$dir/"
+          cp README.md "$dir/"
+          powershell -NoProfile -Command "Compress-Archive -Path '$dir/*' -DestinationPath '$dir.zip'"
+          echo "ASSET=$dir.zip" >> "$GITHUB_ENV"
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" "$ASSET" --title "$GITHUB_REF_NAME" --generate-notes
