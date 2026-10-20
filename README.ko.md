@@ -15,9 +15,9 @@ sprite-tools help
 
 | 일괄 처리 | 편집기 |
 | --- | --- |
-| ![일괄 처리 - 색상 줄이기](docs/screenshots/batch-reduce.png) | ![편집기](docs/screenshots/editor.png) |
+| ![일괄 처리 - 색상 줄이기](docs/screenshots/ko/batch-reduce.png) | ![편집기](docs/screenshots/ko/editor.png) |
 
-![일괄 처리 - 시트 합치기](docs/screenshots/batch-pack.png)
+![일괄 처리 - 시트 합치기](docs/screenshots/ko/batch-pack.png)
 
 ```
 cd gui
