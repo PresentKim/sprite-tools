@@ -45,20 +45,38 @@ type SaveResult struct {
 	Bytes    int64  `json:"bytes"`
 }
 
-// SetEditorDirty: 편집기에 저장하지 않은 변경 사항이 있는지 알려 줍니다 (창을 닫을 때 확인하는 데 씁니다).
+// SetEditorDirty: 편집기에 저장하지 않은 문서가 하나라도 있는지 알려 줍니다 (창을 닫을 때 확인하는 데 씁니다).
+// 몇 개인지 알려 주려면 SetEditorDirtyCount 를 쓰세요.
 func (a *App) SetEditorDirty(dirty bool) {
-	a.editorDirty.Store(dirty)
+	a.SetEditorDirtyCount(b2i(dirty))
+}
+
+// SetEditorDirtyCount: 편집기에서 저장하지 않은 변경이 있는 문서 수를 알려 줍니다. 0 보다 크면 SetEditorDirty 가 true 인 것과 같습니다.
+func (a *App) SetEditorDirtyCount(n int) {
+	if n < 0 {
+		n = 0
+	}
+	a.editorDirty.Store(int32(n))
+}
+
+// dirtyMessage: 종료 확인 창에 보여 줄 안내 문구입니다.
+func dirtyMessage(n int) string {
+	if n <= 1 {
+		return "편집기에 저장하지 않은 변경 사항이 있습니다. 저장하지 않고 종료할까요?"
+	}
+	return fmt.Sprintf("편집기에 저장하지 않은 문서 %d개가 있습니다. 저장하지 않고 종료할까요?", n)
 }
 
 // beforeClose: 편집기에 저장하지 않은 변경이 있으면 종료 전에 한 번 더 묻습니다. true 를 반환하면 종료를 막습니다.
 func (a *App) beforeClose(ctx context.Context) bool {
-	if !a.editorDirty.Load() {
+	n := int(a.editorDirty.Load())
+	if n <= 0 {
 		return false
 	}
 	choice, err := runtime.MessageDialog(ctx, runtime.MessageDialogOptions{
 		Type:          runtime.QuestionDialog,
 		Title:         "종료",
-		Message:       "편집기에 저장하지 않은 변경 사항이 있습니다. 저장하지 않고 종료할까요?",
+		Message:       dirtyMessage(n),
 		Buttons:       []string{"종료", "취소"},
 		DefaultButton: "취소",
 		CancelButton:  "취소",
@@ -340,9 +358,9 @@ type ProcessResult struct {
 }
 
 // 편집기에서 현재 이미지에 적용할 수 있는 일괄 처리 명령입니다.
-var editorCommands = map[string]bool{"reduce": true, "recolor": true, "downscale": true, "upscale": true, "trim": true}
+var editorCommands = map[string]bool{"reduce": true, "recolor": true, "downscale": true, "upscale": true, "trim": true, "despeckle": true}
 
-// ProcessPixels: 편집 중인 픽셀(비곱셈 RGBA, base64)에 일괄 처리 명령(reduce·recolor·downscale·upscale·trim)을 적용한 결과를 돌려줍니다.
+// ProcessPixels: 편집 중인 픽셀(비곱셈 RGBA, base64)에 일괄 처리 명령(reduce·recolor·downscale·upscale·trim·despeckle)을 적용한 결과를 돌려줍니다.
 // 파일을 건드리지 않으며, 처리할 것이 없으면(Skip) 오류 없이 Skipped 로 알립니다.
 func (a *App) ProcessPixels(req JobRequest, width, height int, pixelsB64 string) (ProcessResult, error) {
 	if !editorCommands[req.Command] {

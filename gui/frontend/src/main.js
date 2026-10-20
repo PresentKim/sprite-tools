@@ -1,7 +1,7 @@
 import './style.css';
 import {
   Cancel, DefaultSuffix, Describe, ExpandPaths, ListPalettes, LoadPalette,
-  PickFiles, PickFolder, PickPaletteFile, Preview, PreviewPack, RestoreBackups, Reveal, Run, RunPack, SetEditorDirty,
+  PickFiles, PickFolder, PickPaletteFile, Preview, PreviewPack, RestoreBackups, Reveal, Run, RunPack, SetEditorDirtyCount,
 } from '../wailsjs/go/main/App';
 import { BrowserOpenURL, EventsOn, OnFileDrop } from '../wailsjs/runtime/runtime';
 import { createEditor } from './editor/editor.js';
@@ -16,6 +16,7 @@ const COMMANDS = [
   { id: 'downscale', group: 1, label: '1:1 축소', out: 'file', desc: '확대해서 저장된 픽셀 아트를 원래 크기로 되돌립니다.' },
   { id: 'upscale', group: 1, label: '확대', out: 'file', desc: '정수 배율로 픽셀을 그대로 키웁니다(최근접 이웃).' },
   { id: 'trim', group: 1, label: '여백 자르기', out: 'file', desc: '투명한 바깥 여백을 잘라냅니다. 필요하면 일정한 여백을 남길 수 있습니다.' },
+  { id: 'despeckle', group: 1, label: '조각 지우기', out: 'file', desc: '떨어져 있는 작은 조각(남은 얼룩)을 찾아 투명하게 지웁니다. 기준 크기보다 픽셀 수가 적은 덩어리가 대상입니다.' },
   { id: 'slice', group: 2, label: '프레임 자르기', out: 'slice', desc: '스프라이트 시트를 같은 크기의 프레임으로 잘라 각각 저장합니다.' },
   { id: 'pack', group: 2, label: '시트 합치기', out: 'pack', desc: '목록의 모든 이미지를 한 장의 스프라이트 시트로 합칩니다(프레임 자르기의 반대).' },
 ];
@@ -46,6 +47,8 @@ const defaults = {
   scale: 0,
   upscale: 2,
   pad: 0,
+  minSize: 4, // 조각 지우기: 이보다 작은 조각을 지움
+  diagonal: true, // 조각 지우기: 대각선도 이어진 것으로 봄
   packCols: 0,
   packGap: 0,
   packAlign: 'topleft', // topleft | center
@@ -120,6 +123,8 @@ function request() {
     backup: mode === 'inplace' && settings.backup,
     threads: Number(settings.threads) || 0,
     pad: Math.max(0, Math.round(Number(settings.pad)) || 0),
+    minSize: Math.max(1, Math.round(Number(settings.minSize)) || 4),
+    diagonal: !!settings.diagonal,
     saveName: cmd === 'extract' ? $('save-name').value.trim() : '',
     force: cmd === 'extract' && $('save-force').checked,
     cols: Math.max(0, Math.round(Number(settings.packCols)) || 0),
@@ -141,7 +146,7 @@ function renderTabs() {
     const b = el('button', 'tab');
     b.setAttribute('role', 'tab');
     b.setAttribute('aria-selected', String(c.id === settings.command));
-    b.title = `${c.label} (Alt+${i + 1})`;
+    b.title = i < 10 ? `${c.label} (Alt+${(i + 1) % 10})` : c.label;
     b.append(c.label);
     b.onclick = () => setCommand(c.id);
     tabs.append(b);
@@ -252,6 +257,16 @@ function initOptions() {
     };
   };
   numberSetting('trim-pad', 'pad', 256);
+  numberSetting('despeckle-min', 'minSize', 100000);
+  $('despeckle-min').oninput = () => {
+    const v = Math.round(Number($('despeckle-min').value));
+    if (!(v >= 1)) return; // 입력 중인 빈 값과 0 은 무시
+    settings.minSize = Math.min(100000, v);
+    saveSettings();
+    schedulePreview();
+  };
+  $('despeckle-diag').checked = settings.diagonal;
+  $('despeckle-diag').onchange = (e) => { settings.diagonal = e.target.checked; saveSettings(); schedulePreview(); };
   numberSetting('pack-cols', 'packCols', 256);
   numberSetting('pack-gap', 'packGap', 64);
   const showAlign = () => $('pack-align').querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.align === settings.packAlign));
@@ -397,19 +412,23 @@ function renderSwatches(p) {
 
 // ---------- 파일 목록 ----------
 
-async function addPaths(paths) {
-  if (!paths || !paths.length) return;
+// 반환: 이번에 받은 경로 중 열 수 있는(오류 없는) 파일 경로들 (이미 목록에 있던 것도 포함, 순서대로)
+async function addPaths(paths, opt = {}) {
+  if (!paths || !paths.length) return [];
   try {
     const entries = await ExpandPaths(paths, settings.recursive);
     const known = new Set(state.files.map((f) => f.path.toLowerCase()));
     const fresh = (entries || []).filter((e) => !known.has(e.path.toLowerCase()));
     state.files.push(...fresh.map((e) => ({ ...e, status: e.error ? 'failed' : '', message: e.error || '', v: Date.now() })));
-    if (!fresh.length) toast(entries && entries.length ? '이미 목록에 있는 파일입니다' : 'PNG 파일을 찾지 못했습니다');
-    else if (!state.selected) state.selected = (fresh.find((f) => !f.error) || fresh[0]).path;
+    if (!fresh.length) {
+      if (!opt.quiet || !(entries && entries.length)) toast(entries && entries.length ? '이미 목록에 있는 파일입니다' : 'PNG 파일을 찾지 못했습니다');
+    } else if (!state.selected) state.selected = (fresh.find((f) => !f.error) || fresh[0]).path;
     renderFiles();
     schedulePreview();
+    return (entries || []).filter((e) => !e.error).map((e) => e.path);
   } catch (err) {
     toast(String(err), 'failed');
+    return [];
   }
 }
 
@@ -497,9 +516,11 @@ function renderFiles() {
   $('file-count').textContent = !state.files.length ? ''
     : state.filter ? `표시 ${shown.length} / 전체 ${state.files.length}` : `${state.files.length}개`;
   renderRunButton();
+  editor.filesChanged(); // 편집기의 파일 띠도 같은 목록을 보여 줍니다
 }
 
 function setFilter(text) {
+  if ($('file-filter').value !== text) $('file-filter').value = text; // 편집기의 파일 띠에서 바꾼 경우 입력칸도 맞춤
   const t = text.trim().toLowerCase();
   if (t === state.filter) return;
   state.filter = t;
@@ -1010,9 +1031,7 @@ function initGlobal() {
     depth = 0;
     overlay.classList.remove('on');
     if (settings.mode !== 'editor') { addPaths(paths); return; }
-    const png = (paths || []).find((p) => p.toLowerCase().endsWith('.png'));
-    if (png) editor.open(png);
-    else toast('PNG 파일만 편집기에서 열 수 있습니다', 'failed');
+    editor.dropPaths(paths || []); // 목록에 더하고 첫 파일을 엽니다
   }, false);
 
   window.addEventListener('keydown', (e) => {
@@ -1034,7 +1053,10 @@ function initGlobal() {
       if (!e.repeat) setCompare('cmpKey', true);
       return;
     }
-    if (e.altKey && /^[1-9]$/.test(e.key) && Number(e.key) <= COMMANDS.length) { e.preventDefault(); setCommand(COMMANDS[Number(e.key) - 1].id); return; }
+    if (e.altKey && /^[0-9]$/.test(e.key)) {
+      const n = e.key === '0' ? 10 : Number(e.key);
+      if (n <= COMMANDS.length) { e.preventDefault(); setCommand(COMMANDS[n - 1].id); return; }
+    }
     if (typing) return;
     const vis = visibleFiles();
     const i = vis.findIndex((f) => f.path === state.selected);
@@ -1063,9 +1085,26 @@ const editor = createEditor($('editor'), {
   isBlocked: () => !$('help').hidden,
   getBackup: () => settings.backup,
   setBackup: (on) => { settings.backup = on; saveSettings(); renderOutput(); },
-  onDirtyChange: (dirty) => {
-    $('mode-dot').hidden = !dirty;
-    SetEditorDirty(dirty).catch(() => {});
+  // 편집기와 일괄 처리가 같은 파일 목록(state.files)을 씁니다.
+  files: () => state.files,
+  getFilter: () => $('file-filter').value,
+  setFilter: (text) => setFilter(text),
+  addPaths: (paths) => addPaths(paths, { quiet: true }),
+  removeFile: (path) => removeFile(path),
+  // 편집기에서 보고 있는 파일을 일괄 처리 목록의 선택으로도 맞춰 둡니다 (미리보기는 일괄 처리로 돌아갈 때 갱신).
+  onCurrentChange: (path) => {
+    const f = path && state.files.find((x) => normPath(x.path) === normPath(path));
+    if (!f || state.selected === f.path) return;
+    state.selected = f.path;
+    document.querySelectorAll('.file').forEach((r) => r.classList.toggle('selected', r.dataset.path === f.path));
+  },
+  // n: 저장하지 않은 문서 수
+  onDirtyChange: (n) => {
+    const dot = $('mode-dot');
+    dot.hidden = !n;
+    dot.textContent = n > 1 ? `●${n}` : '●';
+    dot.title = n ? `저장하지 않은 문서 ${n}개` : '';
+    SetEditorDirtyCount(n).catch(() => {});
   },
   // 저장한 파일이 목록에 있으면 크기·썸네일·미리보기를 새로 읽고, 없으면 목록에 추가할 수 있게 합니다.
   onSaved: (path) => {
@@ -1075,7 +1114,7 @@ const editor = createEditor($('editor'), {
       Describe([path]).then(([e]) => {
         Object.assign(f, e, { root: f.root, v: Date.now(), status: '', message: '' });
         renderFiles();
-        schedulePreview();
+        if (settings.mode !== 'editor') schedulePreview();
       });
     } else {
       actions.unshift({ label: '목록에 추가', run: () => addPaths([path]) });
@@ -1092,6 +1131,10 @@ function applyMode() {
   $('editor').hidden = !ed;
   $('mode-seg').querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.mode === settings.mode));
   editor.activate(ed);
+  if (!ed) { // 편집기에서 바뀐 선택을 일괄 처리 화면에 반영
+    schedulePreview();
+    document.querySelector('.file.selected')?.scrollIntoView({ block: 'nearest' });
+  }
 }
 
 function setMode(mode) {

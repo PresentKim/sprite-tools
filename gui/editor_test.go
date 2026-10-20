@@ -8,6 +8,7 @@ import (
 	"image/png"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"sprite-tools/pkg/common"
@@ -423,5 +424,48 @@ func TestSavePaletteColorsRefusesExisting(t *testing.T) {
 	}
 	if _, err := a.SavePaletteColors("Bad Name", cols, false); err == nil {
 		t.Error("잘못된 이름은 거부해야 합니다")
+	}
+}
+
+func TestProcessPixelsDespeckle(t *testing.T) {
+	a := NewApp()
+	src := pixOf(t, 6, 4, func(x, y int) color.NRGBA {
+		if x < 3 && y < 3 || (x == 5 && y == 3) { // 3x3 덩어리 + 외톨이 1픽셀
+			return color.NRGBA{9, 9, 9, 255}
+		}
+		return color.NRGBA{}
+	})
+	res, err := a.ProcessPixels(JobRequest{Command: "despeckle", MinSize: 3, Diagonal: true}, 6, 4, src)
+	if err != nil || res.Skipped || res.Width != 6 || res.Height != 4 {
+		t.Fatalf("despeckle: %+v, %v", res, err)
+	}
+	got := decodeB64(t, res.Pixels)
+	if got[(3*6+5)*4+3] != 0 || got[(1*6+1)*4+3] != 255 {
+		t.Error("외톨이만 지워져야 합니다")
+	}
+	if res, err := a.ProcessPixels(JobRequest{Command: "despeckle", MinSize: 3, Diagonal: true}, 6, 4, res.Pixels); err != nil || !res.Skipped {
+		t.Errorf("지울 것이 없으면 건너뜀이어야 합니다: %+v, %v", res, err)
+	}
+	if _, err := a.ProcessPixels(JobRequest{Command: "despeckle", MinSize: 0}, 6, 4, src); err == nil {
+		t.Error("MinSize 0 은 오류여야 합니다")
+	}
+}
+
+func TestEditorDirtyCount(t *testing.T) {
+	a := NewApp()
+	a.SetEditorDirtyCount(3)
+	if a.editorDirty.Load() != 3 {
+		t.Error("문서 수가 저장되지 않음")
+	}
+	a.SetEditorDirty(false)
+	if a.editorDirty.Load() != 0 {
+		t.Error("SetEditorDirty(false) 는 0 이어야 함")
+	}
+	a.SetEditorDirty(true)
+	if a.editorDirty.Load() != 1 {
+		t.Error("SetEditorDirty(true) 는 1 이어야 함")
+	}
+	if !strings.Contains(dirtyMessage(3), "3개") {
+		t.Errorf("문구: %q", dirtyMessage(3))
 	}
 }

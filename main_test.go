@@ -17,7 +17,8 @@ func TestResolveCommand(t *testing.T) {
 	cases := map[string]string{
 		"reduce": "reduce", "rd": "reduce", "red": "reduce", "simplify": "reduce",
 		"slice": "slice", "sl": "slice", "split": "slice",
-		"downscale": "downscale", "ds": "downscale", "d": "downscale",
+		"downscale": "downscale", "ds": "downscale", "dow": "downscale",
+		"despeckle": "despeckle", "dsp": "despeckle", "de": "despeckle",
 		"index": "index", "ix": "index", "i": "index", "palette": "index",
 		"recolor": "recolor", "rc": "recolor", "rec": "recolor", "palette-convert": "recolor",
 		"upscale": "upscale", "us": "upscale", "up": "upscale",
@@ -35,6 +36,10 @@ func TestResolveCommand(t *testing.T) {
 
 	if cmd, cands := resolveCommand("re"); cmd != nil || !slices.Equal(cands, []string{"reduce", "recolor"}) {
 		t.Errorf("ambiguous prefix: got %v %v", cmd, cands)
+	}
+	// despeckle 이 생기면서 "d" 만으로는 downscale 을 고를 수 없습니다 (ds 는 downscale, dsp 는 despeckle 별칭이라 겹치지 않음).
+	if cmd, cands := resolveCommand("d"); cmd != nil || !slices.Equal(cands, []string{"downscale", "despeckle"}) {
+		t.Errorf("ambiguous prefix d: got %v %v", cmd, cands)
 	}
 	if cmd, _ := resolveCommand("xyz"); cmd != nil {
 		t.Errorf("unknown command resolved to %s", cmd.name)
@@ -87,5 +92,40 @@ func TestBackupFlag(t *testing.T) {
 	}
 	if got, _ := os.ReadFile(matches[0]); !bytes.Equal(got, orig) {
 		t.Error("백업이 원본과 다릅니다")
+	}
+}
+
+func TestDespeckleCommand(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "a.png")
+	img := image.NewNRGBA(image.Rect(0, 0, 8, 8))
+	for y := 2; y < 6; y++ {
+		for x := 2; x < 6; x++ {
+			img.Set(x, y, color.NRGBA{200, 10, 10, 255})
+		}
+	}
+	img.Set(0, 0, color.NRGBA{10, 10, 200, 255}) // 외톨이
+	f, err := os.Create(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := png.Encode(f, img); err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+
+	if code := run([]string{"dsp", "-min", "0", p}); code != exitUsage {
+		t.Errorf("-min 0: exit %d, want %d", code, exitUsage)
+	}
+	if code := run([]string{"dsp", p}); code != exitOK {
+		t.Fatalf("exit %d", code)
+	}
+	out, err := common.LoadPNG(filepath.Join(dir, "a-clean.png"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := common.ToNRGBA(out)
+	if n.NRGBAAt(0, 0).A != 0 || n.NRGBAAt(3, 3).A != 255 {
+		t.Error("외톨이만 지워져야 합니다")
 	}
 }

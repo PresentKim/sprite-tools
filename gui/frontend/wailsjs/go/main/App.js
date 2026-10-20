@@ -93,3 +93,7 @@ export function SavePaletteColors(arg1, arg2, arg3) {
 export function SetEditorDirty(arg1) {
   return window['go']['main']['App']['SetEditorDirty'](arg1);
 }
+
+export function SetEditorDirtyCount(arg1) {
+  return window['go']['main']['App']['SetEditorDirtyCount'](arg1);
+}

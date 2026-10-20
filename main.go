@@ -89,6 +89,15 @@ func init() {
 예시:
   sprite-tools trim icon.png
   sprite-tools tr sprites -r -pad 1 -w`, runTrim},
+		{"despeckle", []string{"dsp"}, nil, "떨어져 있는 작은 조각(얼룩)을 투명하게 지웁니다", "[경로...] [옵션]",
+			`투명하지 않은 픽셀이 이어진 덩어리 가운데 픽셀 수가 -min 보다 작은 것을 완전 투명으로 지웁니다.
+-diagonal(기본 켜짐)이면 대각선으로 닿은 픽셀도 한 덩어리로 보고, -diagonal=false 면 상하좌우로 닿은 것만 한 덩어리입니다.
+지울 조각이 없는 이미지는 건너뜁니다. 주의: 'ds' 는 downscale 의 별칭이고 despeckle 은 'dsp' 또는 'despeckle' 입니다.
+
+예시:
+  sprite-tools despeckle hero.png
+  sprite-tools dsp sprites -r -min 8 -w -backup
+  sprite-tools dsp icon.png -diagonal=false -min 2`, runDespeckle},
 		{"slice", []string{"sl"}, []string{"split"}, "스프라이트 시트를 프레임 단위로 자릅니다", "[경로...] [옵션]",
 			`<이름>-0001.png, <이름>-0002.png ... 로 저장합니다. 완전히 투명한 프레임은 건너뜁니다.
 
@@ -218,7 +227,7 @@ func printHelp() {
 	fmt.Println("  - -w 와 -backup 을 함께 쓰면 덮어쓰기 전에 원본을 <파일 폴더>/" + common.BackupDirName + "/<실행 시각>/ 에 복사해 둡니다.")
 	fmt.Println("  - -o <폴더> 로 다른 폴더에 저장할 수 있습니다 (하위 폴더 구조 유지, -w 와는 함께 쓸 수 없음).")
 	fmt.Println("  - -n 으로 실제 처리 없이 대상 파일만 미리 볼 수 있습니다.")
-	fmt.Println("  - 명령은 별칭이나 겹치지 않는 앞부분으로 줄여 쓸 수 있습니다 (예: rd, red, d).")
+	fmt.Println("  - 명령은 별칭이나 겹치지 않는 앞부분으로 줄여 쓸 수 있습니다 (예: rd, red, de).")
 	fmt.Println()
 	fmt.Printf("자세한 옵션: %s help <명령>\n", programName)
 }

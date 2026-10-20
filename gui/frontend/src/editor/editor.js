@@ -4,13 +4,15 @@
 // 획이 끝나면 History 에 패치 하나로 넣습니다. 선·도형은 드래그하는 동안 되돌렸다 다시 그리며 미리 보여줍니다.
 import './editor.css';
 import {
-  ListPalettes, LoadImageRGBA, LoadPalette, PaletteExists, PickFiles, PickPaletteFile, ProcessPixels, SaveImageAs, SaveImageRGBA,
-  SavePaletteColors,
+  ListPalettes, LoadImageRGBA, LoadPalette, PaletteExists, PickFiles, PickFolder, PickPaletteFile, ProcessPixels, SaveImageAs,
+  SaveImageRGBA, SavePaletteColors,
 } from '../../wailsjs/go/main/App';
 import { css, fromBase64, norm, over, pack, parseHex, toBase64, toHex, unpack } from './color.js';
-import { History } from './history.js';
+import { History, HistoryBudget } from './history.js';
 import { clearOverlay, drawAnts, drawCursor, drawMain, drawNavigator } from './render.js';
 import * as Sel from './selection.js';
+import { createStrip, visibleList } from './strip.js';
+import { createTabs } from './tabs.js';
 import * as T from './tools.js';
 import { el, isModalOpen, modal } from './ui.js';
 
@@ -19,6 +21,7 @@ const TILES = [0, 8, 16, 32, 64];
 const MAX_SIDE = 8192;
 const MAX_PIXELS = 4096 * 4096;
 const PREF_KEY = 'sprite-tools-editor';
+const HISTORY_BUDGET = 256 * 1024 * 1024; // 열려 있는 모든 문서의 실행 취소 기록이 나눠 쓰는 메모리 (문서마다 최대 200단계)
 
 const ICONS = {
   pencil: '<path d="M3 13l.8-3.2L11 2.6 13.4 5 6.2 12.2z"/><path d="M9.6 4l2.4 2.4"/>',
@@ -34,6 +37,7 @@ const ICONS = {
   swap: '<path d="M3 6h9l-2.4-2.4M13 10H4l2.4 2.4"/>',
   select: '<rect x="2.8" y="3.4" width="10.4" height="9.2" stroke-dasharray="2.2 1.6"/>',
   move: '<path d="M8 1.8v12.4M1.8 8h12.4M6.2 3.6L8 1.8l1.8 1.8M6.2 12.4L8 14.2l1.8-1.8M3.6 6.2L1.8 8l1.8 1.8M12.4 6.2L14.2 8l-1.8 1.8"/>',
+  wand: '<path d="M2.6 13.4l6.8-6.8"/><path d="M9.4 6.6l1.4 1.4"/><path d="M11.2 1.8v2.4M10 3h2.4M13.4 5.4v1.8M12.5 6.3h1.8M6.2 2.8v1.6M5.4 3.6H7"/>',
 };
 function icon(name) {
   const s = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -52,6 +56,7 @@ const TOOLS = [
   { id: 'rect', label: '사각형', key: 'U', extra: 'Shift: 정사각형' },
   { id: 'ellipse', label: '타원', key: 'Shift+U', extra: 'Shift: 원' },
   { id: 'select', label: '사각형 선택', key: 'M', extra: 'Shift: 더하기 · Alt: 빼기 · 선택 안쪽을 끌면 이동', group: 1 },
+  { id: 'wand', label: '마법봉', key: 'W', extra: '클릭한 곳과 같은 색 영역 선택 · Shift: 더하기 · Alt: 빼기', group: 1 },
   { id: 'move', label: '이동', key: 'V', extra: '선택 영역(없으면 전체)의 픽셀을 끌어 옮김 · 방향키: 1px, Shift+방향키: 10px', group: 1 },
 ];
 const SELECT_TOOLS = ['select', 'move'];
@@ -61,6 +66,8 @@ const defaultPrefs = {
   shapeFilled: false, symX: false, symY: false, grid: false, tile: 0,
   primary: pack(0, 0, 0, 255), secondary: pack(255, 255, 255, 255), recent: [],
   adhoc: [], palSource: 'adhoc',
+  wandMode: 'contiguous', wand8: false, // 마법봉: 이어진 영역 / 전체 같은 색, 대각선 포함 여부
+  autoSave: false, keepZoom: false, stripCollapsed: false, // 파일 띠 옵션
 };
 
 function loadPrefs() {
@@ -81,11 +88,21 @@ const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const sameFile = (a, b) => !!a && !!b && a.toLowerCase().replace(/\\/g, '/') === b.toLowerCase().replace(/\\/g, '/');
 const baseName = (p) => p.split(/[\\/]/).pop();
 
-// host: 편집기를 넣을 요소. hooks: { toast(text, cls, actions), getBackup(), setBackup(on), onSaved(path, info) -> actions[], onDirtyChange(dirty) }
+// host: 편집기를 넣을 요소.
+// hooks: { toast(text, cls, actions), getBackup(), setBackup(on), onSaved(path, info) -> actions[], onDirtyChange(count),
+//   files() -> 일괄 처리 목록(공유), getFilter(), setFilter(text), addPaths(paths) -> 열 수 있는 경로[], removeFile(path),
+//   onCurrentChange(path), isBlocked() }
+//
+// 문서 모델: S.docs 가 열린 문서(탭) 목록이고 S.doc 이 지금 보이는 문서입니다. 문서마다 픽셀·크기·기록(History)·선택(sel)·
+// 보기(view/autoFit)·원본 경로/형식을 따로 갖고, 도구·색·도구 옵션·팔레트·격자는 모든 문서가 공유합니다(P).
+// 떠 있는 층(S.float)은 문서를 떠날 때 확정합니다. 보고 있는 동안의 확대·이동은 S.view/S.autoFit 에 있다가 문서를 떠날 때 문서에 저장합니다.
 export function createEditor(host, hooks) {
   const P = loadPrefs();
+  const budget = new HistoryBudget(HISTORY_BUDGET);
+  let docSeq = 0;
   const S = {
     doc: null,
+    docs: [],
     active: false,
     view: { zoom: 8, ox: 0, oy: 0 },
     autoFit: true,
@@ -121,14 +138,11 @@ export function createEditor(host, hooks) {
 
   function buildTop() {
     const top = el('div', 'ed-top');
-    R.name = el('span', 'ed-name ellipsis', '');
-    R.dirty = el('span', 'ed-dirty', '●');
-    R.dirty.title = '저장하지 않은 변경 사항';
-    R.dirty.hidden = true;
     R.open = mkBtn('btn small', '열기…', '파일 열기 (Ctrl+O)', () => openDialog());
     R.new = mkBtn('btn small', '새로 만들기', '새 이미지 (Ctrl+N)', () => newDialog());
     R.save = mkBtn('btn small primary', '저장', '저장 (Ctrl+S)', () => save(false));
     R.saveAs = mkBtn('btn small', '다른 이름으로', '다른 이름으로 저장 (Ctrl+Shift+S)', () => save(true));
+    R.saveAll = mkBtn('btn small', '모두 저장', '저장하지 않은 문서를 모두 저장 (Ctrl+Alt+S) — 경로가 없는 새 문서는 건너뜁니다', () => saveAll());
     R.undo = mkBtn('btn small', '↶', '실행 취소 (Ctrl+Z)', () => undo());
     R.redo = mkBtn('btn small', '↷', '다시 실행 (Ctrl+Y / Ctrl+Shift+Z)', () => redo());
     R.zoomOut = mkBtn('btn small', '−', '축소 (-)', () => zoomStep(-1));
@@ -145,8 +159,8 @@ export function createEditor(host, hooks) {
     R.menuEdit = mkBtn('btn small ed-menubtn', '편집 ▾', '복사·붙여넣기·선택', (e) => toggleMenu(R.menuEdit, editMenu));
     R.menuImage = mkBtn('btn small ed-menubtn', '이미지 ▾', '뒤집기·회전·캔버스 크기·자르기', () => toggleMenu(R.menuImage, imageMenu));
     R.menuFx = mkBtn('btn small ed-menubtn', '효과 ▾', '일괄 처리 기능을 현재 이미지에 적용', () => toggleMenu(R.menuFx, fxMenu));
-    top.append(R.name, R.dirty, el('span', 'spacer'), R.open, R.new, sep(), R.save, R.saveAs, sep(), R.undo, R.redo, sep(),
-      R.menuEdit, R.menuImage, R.menuFx, sep(), R.zoomOut, R.zoomLabel, R.zoomIn, R.fit, R.one, sep(), R.grid, R.tile);
+    top.append(R.open, R.new, sep(), R.save, R.saveAs, R.saveAll, sep(), R.undo, R.redo, sep(),
+      R.menuEdit, R.menuImage, R.menuFx, el('span', 'spacer'), R.zoomOut, R.zoomLabel, R.zoomIn, R.fit, R.one, sep(), R.grid, R.tile);
     return top;
   }
 
@@ -169,6 +183,12 @@ export function createEditor(host, hooks) {
 
   function buildCenter() {
     const c = el('div', 'ed-center');
+    R.tabs = createTabs({
+      activate: (id) => { const d = S.docs.find((x) => x.id === id); if (d) switchTo(d); },
+      close: (id) => { const d = S.docs.find((x) => x.id === id); if (d) closeDoc(d); },
+      pin: (id) => { const d = S.docs.find((x) => x.id === id); if (d) pinDoc(d); },
+      closeClean: () => closeClean(),
+    });
     R.view = el('div', 'ed-view');
     R.main = el('canvas', 'ed-canvas');
     R.over = el('canvas', 'ed-canvas ed-over');
@@ -176,7 +196,7 @@ export function createEditor(host, hooks) {
     R.empty.append(
       el('div', 'empty-art'),
       el('p', '', 'PNG 파일을 열거나 새 이미지를 만드세요'),
-      el('p', 'muted small', '일괄 처리 목록에서 파일을 더블클릭해도 편집기에서 열립니다'),
+      el('p', 'muted small', '왼쪽 파일 띠에서 고르거나, 일괄 처리 목록에서 더블클릭하거나, 파일·폴더를 끌어다 놓아도 됩니다'),
     );
     const row = el('div', 'row');
     row.append(mkBtn('btn', '열기…', '', () => openDialog()), mkBtn('btn', '새로 만들기', '', () => newDialog()));
@@ -189,7 +209,7 @@ export function createEditor(host, hooks) {
     R.selInfo = el('span', 'ed-selinfo', '');
     R.hint = el('span', 'muted ellipsis', '');
     status.append(R.coords, R.under, R.selInfo, el('span', 'spacer'), R.hint);
-    c.append(R.view, status);
+    c.append(R.tabs.el, R.view, status);
     return c;
   }
 
@@ -259,7 +279,22 @@ export function createEditor(host, hooks) {
   host.classList.add('editor');
   const top = buildTop();
   const body = el('div', 'ed-body');
-  body.append(buildTools(), buildCenter(), buildSide());
+  R.strip = createStrip({
+    files: () => hooks.files(),
+    filter: () => hooks.getFilter(),
+    setFilter: (t) => hooks.setFilter(t),
+    stateOf: (path) => {
+      const d = findDocByPath(path);
+      return { open: !!d, dirty: !!d && isDirty(d), current: !!(S.doc && sameFile(S.doc.path, path)) };
+    },
+    open: (path, pin) => openPath(path, pin ? 'pin' : 'nav'),
+    addFiles: () => addFilesDialog(),
+    addFolder: () => addFolderDialog(),
+    remove: (path) => hooks.removeFile(path),
+    get: (k) => P[k === 'collapsed' ? 'stripCollapsed' : k],
+    set: (k, v) => { P[k === 'collapsed' ? 'stripCollapsed' : k] = v; savePrefs(); },
+  });
+  body.append(buildTools(), R.strip.el, buildCenter(), buildSide());
   host.append(top, body);
   buildPicker();
 
@@ -267,10 +302,10 @@ export function createEditor(host, hooks) {
 
   function syncTop() {
     const d = S.doc;
-    R.name.textContent = d ? d.name : '열린 파일 없음';
-    R.name.title = d?.path || '';
-    R.dirty.hidden = !(d && d.history.dirty);
     for (const b of [R.save, R.saveAs, R.zoomOut, R.zoomIn, R.fit, R.one, R.grid, R.tile, R.menuEdit, R.menuImage, R.menuFx]) b.disabled = !d;
+    const nd = dirtyDocs().length;
+    R.saveAll.disabled = nd === 0 || !!S.fx;
+    R.saveAll.textContent = nd > 1 ? `모두 저장 (${nd})` : '모두 저장';
     R.undo.disabled = !d || !d.history.canUndo || !!S.fx;
     R.redo.disabled = !d || !d.history.canRedo || !!S.fx;
     R.grid.classList.toggle('on', P.grid);
@@ -293,6 +328,7 @@ export function createEditor(host, hooks) {
       rect: '드래그 · Shift: 정사각형 · Esc: 취소',
       ellipse: '드래그 · Shift: 원 · Esc: 취소',
       select: '드래그: 선택 · Shift: 더하기 · Alt: 빼기 · 선택 안쪽 드래그: 이동 · 빈 곳 클릭: 해제 · Ctrl+A/D/Shift+I',
+      wand: '클릭: 같은 색 영역 선택 · Shift: 더하기 · Alt: 빼기 · 빈 곳 클릭: 해제 · Delete: 선택 지우기',
       move: '드래그: 선택 영역(없으면 전체) 이동 · 방향키 1px (Shift 10px) · Enter: 확정 · Esc: 취소',
     };
     R.view.dataset.tool = P.tool;
@@ -374,6 +410,17 @@ export function createEditor(host, hooks) {
     return wrap;
   }
 
+  // 채우기와 마법봉이 함께 쓰는 허용 오차 슬라이더
+  function toleranceRow() {
+    const tol = el('div', 'ed-range');
+    const r = el('input');
+    r.type = 'range'; r.min = 0; r.max = 128; r.step = 1; r.value = P.tolerance;
+    const v = el('span', 'value', String(P.tolerance));
+    r.oninput = () => { P.tolerance = Number(r.value); v.textContent = r.value; savePrefs(); };
+    tol.append(r, v);
+    return optRow('허용 오차 (0 = 정확히 같은 색)', tol);
+  }
+
   function renderOptions() {
     const o = R.opts;
     o.replaceChildren();
@@ -389,19 +436,21 @@ export function createEditor(host, hooks) {
     }
     if (t === 'fill') {
       o.append(optRow('채우기', segment([['contiguous', '이어진 영역'], ['global', '전체 같은 색']], P.fillMode, (v) => { P.fillMode = v; savePrefs(); renderOptions(); })));
-      const tol = el('div', 'ed-range');
-      const r = el('input');
-      r.type = 'range'; r.min = 0; r.max = 128; r.step = 1; r.value = P.tolerance;
-      const v = el('span', 'value', String(P.tolerance));
-      r.oninput = () => { P.tolerance = Number(r.value); v.textContent = r.value; savePrefs(); };
-      tol.append(r, v);
-      o.append(optRow('허용 오차 (0 = 정확히 같은 색)', tol));
+      o.append(toleranceRow());
+    }
+    if (t === 'wand') {
+      o.append(optRow('선택 범위', segment([['contiguous', '이어진 영역'], ['global', '전체 같은 색']], P.wandMode, (v) => { P.wandMode = v; savePrefs(); renderOptions(); })));
+      if (P.wandMode === 'contiguous') {
+        o.append(checkbox('대각선도 이어진 것으로 (8방향)', P.wand8, (v) => { P.wand8 = v; savePrefs(); }, '끄면 상하좌우로 닿은 픽셀만 같은 영역으로 봅니다'));
+      }
+      o.append(toleranceRow());
+      o.append(el('p', 'muted small', '완전히 투명한 픽셀은 모두 같은 색으로 봅니다. 채우기와 같은 허용 오차를 씁니다.'));
     }
     if (t === 'rect' || t === 'ellipse') {
       o.append(optRow('도형', segment([[false, '윤곽선'], [true, '채움']], P.shapeFilled, (v) => { P.shapeFilled = v; savePrefs(); renderOptions(); })));
     }
     if (t === 'picker') o.append(el('p', 'muted small', '클릭한 픽셀의 색(알파 포함)을 가져옵니다.'));
-    if (t === 'select') o.append(el('p', 'muted small', '선택이 있으면 다른 그리기 도구도 선택된 픽셀만 바꿉니다.'));
+    if (t === 'select' || t === 'wand') o.append(el('p', 'muted small', '선택이 있으면 다른 그리기 도구도 선택된 픽셀만 바꿉니다.'));
     if (t === 'move') o.append(el('p', 'muted small', '선택 영역이 없으면 이미지 전체를 옮깁니다. 캔버스 밖으로 나간 부분은 확정할 때 잘립니다.'));
     R.optSec.hidden = false;
   }
@@ -528,35 +577,95 @@ export function createEditor(host, hooks) {
     const imageData = new ImageData(pix, w, h);
     octx.putImageData(imageData, 0, 0);
     return {
+      id: meta.id ?? ++docSeq,
       w, h, pix, px32: new Uint32Array(pix.buffer), off, octx, imageData, mark: new Uint8Array(w * h),
       path, name, indexed: !!meta.indexed, palSize: meta.colors || 0,
-      history: meta.history || new History(), dirtyRect: null, colorCount: null, sel: null,
+      history: meta.history || new History({ budget }), dirtyRect: null, colorCount: null, sel: null,
+      view: meta.view || null, // 문서를 떠날 때 저장해 두는 보기 (없으면 처음 열 때 화면에 맞춤)
+      autoFit: meta.autoFit ?? true,
+      preview: !!meta.preview, // 탐색으로 연 미리보기 탭 (고치거나 더블클릭하면 고정)
     };
   }
 
-  // 같은 문서(경로·기록 유지)에서 크기나 내용만 통째로 바꾼 새 문서를 만듭니다. 선택은 해제됩니다.
+  // 같은 문서(경로·기록·탭 정보 유지)에서 크기나 내용만 통째로 바꾼 새 문서를 만듭니다. 선택은 해제됩니다.
   function rebuildDoc(d, w, h, pix) {
-    return makeDoc(w, h, pix, d.path, d.name, { indexed: d.indexed, colors: d.palSize, history: d.history });
+    return makeDoc(w, h, pix, d.path, d.name, {
+      id: d.id, indexed: d.indexed, colors: d.palSize, history: d.history, view: d.view, autoFit: d.autoFit, preview: d.preview,
+    });
   }
 
-  function setDoc(doc) {
+  const findDocByPath = (path) => (path ? S.docs.find((d) => sameFile(d.path, path)) || null : null);
+  // 보고 있는 문서의 떠 있는 층도 아직 확정 전인 변경으로 칩니다.
+  const isDirty = (d) => d.history.dirty || (S.doc && d.id === S.doc.id && !!S.float);
+  const dirtyDocs = () => S.docs.filter(isDirty);
+
+  let lastDirty = 0;
+  let docSig = '';
+  let lastCurrent = null;
+  let lastActiveId = 0;
+
+  // 탭과 파일 띠를 문서 상태에 맞춰 다시 그립니다 (달라진 것이 없으면 건너뜀).
+  function syncDocs(force = false) {
+    const sig = S.docs.map((d) => `${d.id}:${d.name}:${d.path}:${d.preview ? 1 : 0}:${isDirty(d) ? 1 : 0}`).join('|') + `#${S.doc ? S.doc.id : 0}`;
+    if (!force && sig === docSig) return;
+    docSig = sig;
+    R.tabs.render(S.docs, S.doc ? S.doc.id : 0, isDirty);
+    R.strip.render();
+    const id = S.doc ? S.doc.id : 0;
+    if (id !== lastActiveId) { lastActiveId = id; R.strip.scrollToCurrent(); } // 보던 문서가 바뀔 때만 띠를 맞춰 스크롤
+  }
+
+  function updateDirty() {
+    const n = dirtyDocs().length;
+    if (n !== lastDirty) { lastDirty = n; hooks.onDirtyChange?.(n); }
+  }
+
+  function notifyCurrent() {
+    const p = S.doc?.path || '';
+    if (p !== lastCurrent) { lastCurrent = p; hooks.onCurrentChange?.(p); }
+  }
+
+  // 문서를 바꿔 보여 줍니다. 떠 있는 층은 확정하고, 지금 문서의 보기(확대·위치)는 그 문서에 저장해 둡니다.
+  // o.view 가 있으면 새 문서의 보기로 쓰고(확대 유지), 없으면 문서가 저장해 둔 보기 또는 화면 맞춤을 씁니다.
+  function activateDoc(d, o = {}) {
+    cancelStroke();
+    cancelFx();
+    commitFloat();
+    S.drag = null;
+    R.view.classList.remove('panning');
+    const prev = S.doc;
+    if (prev && prev.id !== d.id) { prev.view = { ...S.view }; prev.autoFit = S.autoFit; }
+    S.doc = d;
+    S.hover = null;
+    budget.touch(d.history);
+    if (o.view) { S.view = { ...o.view }; S.autoFit = false; }
+    else if (d.view) { S.view = { ...d.view }; S.autoFit = d.autoFit; }
+    else S.autoFit = true;
+    afterChange();
+    if (S.autoFit) fit();
+    else { measure(); clampPan(); render(); }
+    notifyCurrent();
+  }
+
+  // 열린 문서가 하나도 없는 상태
+  function showNone() {
     cancelStroke();
     cancelFx();
     S.float = null;
-    S.doc = doc;
-    S.autoFit = true;
+    S.drag = null;
+    S.doc = null;
     S.hover = null;
     afterChange();
-    fit();
+    notifyCurrent();
   }
 
-  const isDirtyNow = () => !!(S.doc && (S.doc.history.dirty || S.float));
-  let lastDirty = false;
   function afterChange() {
     syncTop();
     syncSel();
-    const dirty = isDirtyNow();
-    if (dirty !== lastDirty) { lastDirty = dirty; hooks.onDirtyChange?.(dirty); }
+    const d = S.doc;
+    if (d && d.preview && isDirty(d)) d.preview = false; // 고치기 시작하면 탭이 고정됩니다
+    updateDirty();
+    syncDocs();
     scheduleInfo();
     render();
   }
@@ -951,7 +1060,7 @@ export function createEditor(host, hooks) {
     S.hover = { x, y };
     const color = e.button === 2 ? P.secondary : P.primary;
     let tool = P.tool;
-    if (e.altKey && tool !== 'picker' && tool !== 'select') tool = 'picker'; // 선택 도구에서 Alt 는 "빼기"
+    if (e.altKey && tool !== 'picker' && tool !== 'select' && tool !== 'wand') tool = 'picker'; // 선택 도구에서 Alt 는 "빼기"
     if (tool === 'picker') {
       S.drag = { kind: 'picker', id: e.pointerId, button: e.button };
       capture(e);
@@ -960,6 +1069,10 @@ export function createEditor(host, hooks) {
     }
     if (tool === 'select' || tool === 'move') {
       if (e.button === 0) selectPointerDown(e, tool, x, y);
+      return;
+    }
+    if (tool === 'wand') {
+      if (e.button === 0) wandClick(e, x, y);
       return;
     }
     if (S.float) commitFloat();
@@ -976,6 +1089,22 @@ export function createEditor(host, hooks) {
       drawShape(x, y, e.shiftKey);
     }
     render();
+  }
+
+  // 마법봉: 클릭한 픽셀과 같은 색(허용 오차 이내)인 영역을 선택합니다. Shift: 선택에 더하기, Alt: 선택에서 빼기.
+  // 완전히 투명한 픽셀(알파 0)은 RGB 와 상관없이 모두 같은 색입니다.
+  function wandClick(e, x, y) {
+    const d = S.doc;
+    commitFloat();
+    const mode = e.shiftKey ? 'add' : e.altKey ? 'sub' : 'replace';
+    if (x < 0 || y < 0 || x >= d.w || y >= d.h) { // 이미지 밖 클릭 = 선택 해제 (수정 키가 없을 때)
+      if (mode === 'replace') setSelection(null);
+      return;
+    }
+    const list = P.wandMode === 'global'
+      ? T.floodGlobal(d.px32, x, y, d.w, P.tolerance)
+      : T.floodContiguous(d.px32, d.w, d.h, x, y, P.tolerance, P.wand8);
+    setSelection(Sel.combineSels(d.sel, Sel.fromIndices(list, d.w), mode));
   }
 
   // 선택·이동 도구: 선택 안쪽(또는 이동 도구)에서는 떠 있는 층을 끌고, 그 밖에서는 사각형 선택을 시작합니다.
@@ -1336,6 +1465,8 @@ export function createEditor(host, hooks) {
     const sized = d.w !== w || d.h !== h;
     S.float = null;
     S.doc = rebuildDoc(d, w, h, pix);
+    const at = S.docs.indexOf(d);
+    if (at >= 0) S.docs[at] = S.doc;
     if (sized) {
       if (S.autoFit) fit(); else clampPan();
     }
@@ -1495,6 +1626,8 @@ export function createEditor(host, hooks) {
     { label: '팔레트 적용…', run: () => openEffect('recolor') },
     { label: '1:1 축소…', run: () => openEffect('downscale') },
     { label: '확대…', run: () => openEffect('upscale') },
+    '-',
+    { label: '작은 조각 지우기…', run: () => openEffect('despeckle') },
   ];
 
   // ---------- 효과 (일괄 처리 기능을 현재 이미지에 적용) ----------
@@ -1503,7 +1636,7 @@ export function createEditor(host, hooks) {
 
   const FX_SCALES = [0, 2, 3, 4, 5, 6, 8, 10, 12, 16];
   const FX_UPSCALES = [2, 3, 4, 5, 6, 8, 10, 12, 16];
-  const fxPrefs = { mode: 'threshold', threshold: 0.05, maxColors: 16, scale: 0, upscale: 2, palette: '', ...(P.fx || {}) };
+  const fxPrefs = { mode: 'threshold', threshold: 0.05, maxColors: 16, scale: 0, upscale: 2, palette: '', minSize: 4, diagonal: true, ...(P.fx || {}) };
   const saveFxPrefs = () => { P.fx = { ...fxPrefs }; savePrefs(); };
 
   async function openEffect(kind) {
@@ -1516,7 +1649,7 @@ export function createEditor(host, hooks) {
       sized: `${d0.w}x${d0.h}`, req: null,
     };
     S.fx = fx;
-    const titles = { reduce: '색상 줄이기', recolor: '팔레트 적용', downscale: '1:1 축소', upscale: '확대' };
+    const titles = { reduce: '색상 줄이기', recolor: '팔레트 적용', downscale: '1:1 축소', upscale: '확대', despeckle: '작은 조각 지우기' };
     const body = el('div', 'ed-opts');
     const status = el('p', 'small ed-fx-status', '');
     fx.status = status;
@@ -1576,6 +1709,18 @@ export function createEditor(host, hooks) {
       });
       body.append(optRow('팔레트', sel), file);
       fx.req = () => ({ command: 'recolor', palette: sel.value });
+    } else if (kind === 'despeckle') {
+      const n = el('input');
+      n.type = 'number'; n.min = 1; n.max = 100000; n.step = 1; n.value = fxPrefs.minSize;
+      n.oninput = () => {
+        const v = Math.round(Number(n.value));
+        if (v >= 1 && v <= 100000) { fxPrefs.minSize = v; saveFxPrefs(); run(); }
+      };
+      const diag = checkbox('대각선도 이어진 것으로 (8방향)', fxPrefs.diagonal, (v) => { fxPrefs.diagonal = v; saveFxPrefs(); run(); },
+        '끄면 상하좌우로 닿은 픽셀만 한 조각으로 봅니다');
+      body.append(optRow('이보다 픽셀 수가 적은 조각을 지움', n), diag,
+        el('p', 'muted small', '투명하지 않은 픽셀이 이어진 덩어리를 한 조각으로 봅니다. 알파가 조금이라도 있으면 내용으로 칩니다.'));
+      fx.req = () => ({ command: 'despeckle', minSize: fxPrefs.minSize, diagonal: fxPrefs.diagonal });
     } else if (kind === 'downscale') {
       const sel = el('select');
       FX_SCALES.forEach((v) => sel.append(new Option(v === 0 ? '자동 감지' : `${v}배`, v)));
@@ -1603,7 +1748,10 @@ export function createEditor(host, hooks) {
     const cancel = mkBtn('btn small', '취소', '되돌리기 (Esc)', () => cancelFx());
     const foot = el('div', 'row');
     foot.append(fx.ok, cancel);
-    R.fxSec.replaceChildren(el('h3', '', `효과 — ${titles[kind]}`), body, status, el('p', 'muted small', '선택 영역과 상관없이 이미지 전체에 적용됩니다.'), cmp, foot);
+    const scope = kind === 'despeckle'
+      ? (d0.sel ? '선택 영역이 있어 그 안쪽 픽셀만 지웁니다. 조각은 이미지 전체에서 찾습니다.' : '선택 영역이 있으면 그 안쪽 픽셀만 지웁니다 (없으면 이미지 전체).')
+      : '선택 영역과 상관없이 이미지 전체에 적용됩니다.';
+    R.fxSec.replaceChildren(el('h3', '', `효과 — ${titles[kind]}`), body, status, el('p', 'muted small', scope), cmp, foot);
     R.fxSec.hidden = false;
     R.side.scrollTop = 0;
     syncTop();
@@ -1636,9 +1784,37 @@ export function createEditor(host, hooks) {
         fx.status.className = 'small warn ed-fx-status';
         fx.ok.disabled = true;
       } else {
-        const pix = fromBase64(res.pixels, new Uint8ClampedArray(res.width * res.height * 4));
-        fx.result = { doc: rebuildDoc(d0, res.width, res.height, pix), msg: res.message, w: res.width, h: res.height };
-        fx.status.textContent = `${res.message} → ${res.width} × ${res.height}`;
+        let pix = fromBase64(res.pixels, new Uint8ClampedArray(res.width * res.height * 4));
+        let msg = res.message;
+        // 작은 조각 지우기: 선택 영역이 있으면 그 안쪽 픽셀만 결과를 쓰고 나머지는 원본을 둡니다.
+        if (fx.kind === 'despeckle' && d0.sel && res.width === d0.w && res.height === d0.h) {
+          const proc = new Uint32Array(pix.buffer);
+          const merged = d0.px32.slice();
+          const sel = d0.sel;
+          let cnt = 0;
+          for (let y = 0; y < sel.h; y++) {
+            const gy = sel.y + y;
+            if (gy < 0 || gy >= d0.h) continue;
+            for (let x = 0; x < sel.w; x++) {
+              const gx = sel.x + x;
+              if (gx < 0 || gx >= d0.w || !sel.mask[y * sel.w + x]) continue;
+              const i = gy * d0.w + gx;
+              if (merged[i] !== proc[i]) { merged[i] = proc[i]; cnt++; }
+            }
+          }
+          if (!cnt) {
+            fx.result = null;
+            fx.status.textContent = '선택 영역 안에는 지울 조각이 없습니다';
+            fx.status.className = 'small warn ed-fx-status';
+            fx.ok.disabled = true;
+            showFxDoc();
+            return;
+          }
+          pix = new Uint8ClampedArray(merged.buffer);
+          msg = `선택 영역 안의 픽셀 ${cnt}개 제거 (${res.message})`;
+        }
+        fx.result = { doc: rebuildDoc(d0, res.width, res.height, pix), msg, w: res.width, h: res.height };
+        fx.status.textContent = `${msg} → ${res.width} × ${res.height}`;
         fx.status.className = 'small ed-fx-status';
         fx.ok.disabled = false;
       }
@@ -1982,45 +2158,210 @@ export function createEditor(host, hooks) {
     if (p) applyPatch(p, 'redo');
   }
 
-  // ---------- 파일 ----------
+  // ---------- 파일 · 문서(탭) ----------
 
-  async function confirmDiscard() {
-    cancelFx();
-    commitFloat();
-    const d = S.doc;
-    if (!d || !d.history.dirty) return true;
-    const r = await modal({
-      title: '저장하지 않은 변경 사항이 있습니다',
-      build: (b) => b.append(el('p', '', `'${d.name}' 의 변경 사항을 저장할까요?`)),
-      buttons: [{ label: '취소', value: 'cancel' }, { label: '저장 안 함', value: 'discard' }, { label: '저장', value: 'save', primary: true }],
-    });
-    if (r === 'discard') return true;
-    if (r === 'save') return save(false);
-    return false;
+  const newName = () => {
+    let n = 1;
+    const taken = new Set(S.docs.map((d) => d.name));
+    while (taken.has(n === 1 ? '제목 없음.png' : `제목 없음 ${n}.png`)) n++;
+    return n === 1 ? '제목 없음.png' : `제목 없음 ${n}.png`;
+  };
+
+  // 작업 중(획·효과 미리보기)에는 문서를 바꾸지 않습니다. 효과 미리보기는 안내만 하고 그대로 둡니다.
+  function canSwitch() {
+    if (S.fx) { hooks.toast('효과 미리보기를 먼저 확정(Enter)하거나 취소(Esc)하세요'); return false; }
+    return !S.cur;
   }
 
-  async function open(path) {
-    if (S.cur) return false;
-    cancelFx();
-    commitFloat();
-    const d = S.doc;
-    if (d && sameFile(d.path, path) && d.history.dirty) return true; // 이미 열려 있고 고친 상태 — 그대로 둠
-    if (!(d && sameFile(d.path, path)) && !(await confirmDiscard())) return false;
-    try {
-      const r = await LoadImageRGBA(path);
-      const pix = fromBase64(r.pixels, new Uint8ClampedArray(r.width * r.height * 4));
-      setDoc(makeDoc(r.width, r.height, pix, r.path, baseName(r.path), { indexed: r.indexed, colors: r.colors }));
+  // 탭·Ctrl+Tab 으로 문서를 바꿉니다.
+  function switchTo(d) {
+    const cur = S.fx ? S.fx.orig : S.doc;
+    if (d === cur) return true;
+    if (!canSwitch()) return false;
+    activateDoc(d);
+    return true;
+  }
+
+  function cycleDoc(dir) {
+    const n = S.docs.length;
+    if (n < 2) return;
+    const i = S.docs.findIndex((d) => d.id === (S.doc ? S.doc.id : 0));
+    switchTo(S.docs[(i + dir + n) % n]);
+  }
+
+  function pinDoc(d) {
+    if (!d.preview) return;
+    d.preview = false;
+    syncDocs();
+  }
+
+  function removeDoc(d) {
+    const i = S.docs.findIndex((x) => x.id === d.id);
+    if (i < 0) return;
+    S.docs.splice(i, 1);
+    d.history.dispose();
+  }
+
+  // 이미 열려 있는 파일이면 그 탭으로, 아니면 읽어서 새 탭으로 엽니다.
+  //  mode 'nav': 탐색으로 열기 — 수정하지 않은 미리보기 탭이 있으면 그 자리를 대신합니다 (이탤릭 탭).
+  //  mode 'pin': 명시적으로 열기 — 항상 새 탭이고 고정됩니다.
+  let navSeq = 0;
+  async function openPath(path, mode = 'nav') {
+    if (S.cur || !path) return false;
+    const exist = findDocByPath(path);
+    if (exist) {
+      if (!switchTo(exist)) return false;
+      if (mode === 'pin') pinDoc(exist);
       return true;
+    }
+    if (S.fx) { canSwitch(); return false; }
+    const seq = mode === 'nav' ? ++navSeq : navSeq;
+    let r;
+    try {
+      r = await LoadImageRGBA(path);
     } catch (err) {
       hooks.toast(String(err), 'failed');
       return false;
     }
+    if (mode === 'nav' && seq !== navSeq) return false; // 그 사이 다른 파일로 넘어감 (마지막 요청만 반영)
+    const again = findDocByPath(r.path);
+    if (again) { if (!switchTo(again)) return false; if (mode === 'pin') pinDoc(again); return true; }
+    if (S.cur || S.fx) return false;
+    const pix = fromBase64(r.pixels, new Uint8ClampedArray(r.width * r.height * 4));
+    const doc = makeDoc(r.width, r.height, pix, r.path, baseName(r.path), { indexed: r.indexed, colors: r.colors, preview: mode === 'nav' });
+    const view = mode === 'nav' ? keptView(doc) : null;
+    const old = insertDoc(doc);
+    activateDoc(doc, { view });
+    if (old) old.history.dispose();
+    return true;
+  }
+
+  // 새 문서를 탭 목록에 넣습니다. 미리보기 문서이고 수정 안 한 미리보기 탭이 있으면 그 자리를 대신하고 그 탭을 돌려줍니다.
+  function insertDoc(doc) {
+    if (doc.preview) {
+      const i = S.docs.findIndex((d) => d.preview && !isDirty(d));
+      if (i >= 0) {
+        const old = S.docs[i];
+        S.docs[i] = doc;
+        return old;
+      }
+    }
+    const a = S.doc ? S.docs.findIndex((d) => d.id === S.doc.id) : -1;
+    S.docs.splice(a >= 0 ? a + 1 : S.docs.length, 0, doc);
+    return null;
+  }
+
+  // "확대 유지": 새로 연 파일에 지금 보던 확대 배율(같은 크기면 위치까지)을 씁니다. 맞춤 상태였다면 평소처럼 맞춥니다.
+  function keptView(doc) {
+    if (!P.keepZoom || !S.doc || S.autoFit) return null;
+    measure();
+    const v = S.view;
+    if (S.doc.w === doc.w && S.doc.h === doc.h) return { ...v };
+    return { zoom: v.zoom, ox: (viewW - doc.w * v.zoom) / 2, oy: (viewH - doc.h * v.zoom) / 2 };
+  }
+
+  // 목록의 다음(1)·이전(-1) 파일을 엽니다. 키를 빠르게 눌러도 한 번에 하나씩 차례로 처리합니다.
+  let stepBusy = 0;
+  // 앞선 이동이 끝난 뒤에 이어서 실행합니다 (대기는 최대 한 건).
+  let stepChain = Promise.resolve();
+  function step(dir) {
+    if (stepBusy >= 2) return;
+    stepBusy++;
+    stepChain = stepChain.then(() => stepOnce(dir)).catch(() => {}).finally(() => { stepBusy--; });
+  }
+
+  async function stepOnce(dir) {
+    if (S.fx) { canSwitch(); return; }
+    if (S.cur || S.drag) return;
+    const list = visibleList(hooks.files(), hooks.getFilter());
+    if (!list.length) { hooks.toast('파일 목록이 비어 있습니다. 파일 띠의 ＋ 로 추가하세요'); return; }
+    const cur = S.doc?.path;
+    const i = list.findIndex((f) => sameFile(f.path, cur));
+    const ni = i < 0 ? (dir > 0 ? 0 : list.length - 1) : i + dir;
+    if (ni < 0 || ni >= list.length) { hooks.toast(dir > 0 ? '마지막 파일입니다' : '첫 파일입니다'); return; }
+    const d = S.doc;
+    // 자동 저장: 고친 문서를 저장하고 넘어갑니다. 저장에 실패하면 넘어가지 않습니다.
+    if (d && P.autoSave && isDirty(d) && d.path) {
+      const r = await saveDoc(d, false);
+      if (!r.ok) {
+        if (r.error) hooks.toast(`자동 저장 실패: ${r.error}`, 'failed');
+        return;
+      }
+    }
+    await openPath(list[ni].path, 'nav');
+  }
+
+  // 문서를 닫습니다. 저장하지 않은 변경이 있으면 저장 / 저장 안 함 / 취소를 묻습니다. 닫았으면 true.
+  async function closeDoc(d, opt = {}) {
+    if (!S.docs.some((x) => x.id === d.id) || S.cur) return false;
+    if (S.doc && S.doc.id === d.id) { cancelFx(); commitFloat(); }
+    if (isDirty(d) && !opt.discard) {
+      const r = await modal({
+        title: '저장하지 않은 변경 사항이 있습니다',
+        build: (b) => b.append(el('p', '', `'${d.name}' 의 변경 사항을 저장할까요?`)),
+        buttons: [{ label: '취소', value: 'cancel' }, { label: '저장 안 함', value: 'discard' }, { label: '저장', value: 'save', primary: true }],
+      });
+      if (r === 'save') {
+        const sr = await saveDoc(d, false);
+        if (!sr.ok) {
+          if (sr.error) hooks.toast(`저장 실패: ${sr.error}`, 'failed');
+          return false;
+        }
+        reportSaved(sr);
+      } else if (r !== 'discard') {
+        return false;
+      }
+    }
+    const cur = S.docs.find((x) => x.id === d.id);
+    if (!cur) return false; // 대화상자가 떠 있는 동안 이미 닫힘
+    if (S.doc && S.doc.id === cur.id) {
+      const i = S.docs.indexOf(cur);
+      const next = S.docs[i + 1] || S.docs[i - 1];
+      if (next) activateDoc(next);
+      else showNone();
+    }
+    removeDoc(cur);
+    afterChange();
+    return true;
+  }
+
+  // 수정하지 않은 탭을 모두 닫습니다 (저장된 탭 정리).
+  function closeClean() {
+    if (!canSwitch()) return;
+    const keep = S.docs.filter(isDirty);
+    const clean = S.docs.filter((d) => !isDirty(d));
+    if (!clean.length) return;
+    if (S.doc && clean.some((d) => d.id === S.doc.id)) {
+      const i = S.docs.findIndex((d) => d.id === S.doc.id);
+      const near = keep.find((d) => S.docs.indexOf(d) > i) || keep[keep.length - 1];
+      if (near) activateDoc(near); else showNone();
+    }
+    for (const d of clean) removeDoc(d);
+    afterChange();
+    hooks.toast(`수정하지 않은 탭 ${clean.length}개를 닫았습니다`);
+  }
+
+  // 목록에 파일을 더하고 첫 파일을 엽니다 (탐색 열기). 열 수 있는 경로 목록을 돌려줍니다.
+  async function addAndOpen(paths, mode = 'nav') {
+    const list = await hooks.addPaths(paths);
+    if (list && list.length) await openPath(list[0], mode);
+    return list || [];
+  }
+  async function addFilesDialog() {
+    if (S.cur || S.fx) return;
+    const paths = await PickFiles();
+    if (paths && paths.length) await addAndOpen(paths);
+  }
+  async function addFolderDialog() {
+    if (S.cur || S.fx) return;
+    const dir = await PickFolder('이미지 폴더 선택');
+    if (dir) await addAndOpen([dir]);
   }
 
   async function openDialog() {
     if (S.cur || S.fx) return;
     const paths = await PickFiles();
-    if (paths && paths.length) await open(paths[0]);
+    if (paths && paths.length) await addAndOpen(paths, 'pin');
   }
 
   async function newDialog() {
@@ -2056,43 +2397,94 @@ export function createEditor(host, hooks) {
         },
       ],
     });
-    if (r !== 'ok') return;
-    if (!(await confirmDiscard())) return;
+    if (r !== 'ok' || S.cur || S.fx) return;
     const w = Number(wIn.value), h = Number(hIn.value);
-    setDoc(makeDoc(w, h, new Uint8ClampedArray(w * h * 4), '', '제목 없음.png'));
+    const doc = makeDoc(w, h, new Uint8ClampedArray(w * h * 4), '', newName());
+    insertDoc(doc);
+    activateDoc(doc);
   }
 
-  // 저장에 성공하면 true
-  async function save(as) {
-    if (S.fx) return false;
-    commitFloat();
-    const d = S.doc;
-    if (!d || S.saving || S.cur) return false;
+  // 문서 하나를 저장합니다. as 이거나 경로가 없으면 저장 대화상자를 엽니다.
+  // 반환: { ok, canceled, error, res, isNewPath, backup, name } — 토스트는 부르는 쪽이 정합니다.
+  async function saveDoc(d, as = false) {
+    if (S.saving) return { ok: false, error: '다른 저장이 진행 중입니다' };
     S.saving = true;
     try {
+      if (S.doc && S.doc.id === d.id && !S.fx) commitFloat();
       const pixels = toBase64(d.pix);
       const backup = !!hooks.getBackup();
+      const h0 = d.history;
+      const mark = { len: h0.undoStack.length, last: h0.undoStack[h0.undoStack.length - 1] };
       let res;
       if (!as && d.path) res = await SaveImageRGBA(d.path, d.w, d.h, pixels, backup);
-      else res = await SaveImageAs(d.path, d.path ? baseName(d.path) : '제목 없음.png', d.w, d.h, pixels, backup);
-      if (res.canceled) return false;
-      const isNewPath = !sameFile(d.path, res.path);
-      d.path = res.path;
-      d.name = baseName(res.path);
-      d.indexed = res.format === 'indexed';
-      d.palSize = res.colors || 0;
-      d.history.markSaved();
+      else res = await SaveImageAs(d.path, d.path ? baseName(d.path) : d.name, d.w, d.h, pixels, backup);
+      if (res.canceled) return { ok: false, canceled: true };
+      const cur = S.docs.find((x) => x.id === d.id) || d;
+      const isNewPath = !sameFile(cur.path, res.path);
+      cur.path = res.path;
+      cur.name = baseName(res.path);
+      cur.indexed = res.format === 'indexed';
+      cur.palSize = res.colors || 0;
+      // 저장하는 동안 더 고쳤다면 저장된 시점이 아니므로 계속 "변경됨"으로 둡니다.
+      const h = cur.history;
+      if (h.undoStack.length === mark.len && h.undoStack[mark.len - 1] === mark.last) h.markSaved();
       afterChange();
-      const fmt = res.format === 'indexed' ? `인덱스 PNG ${res.colors}색` : 'RGBA PNG';
       const actions = hooks.onSaved(res.path, { isNewPath, backup: res.backup }) || [];
-      hooks.toast(`${d.name} 저장됨 · ${fmt}${res.backup ? ' · 원본 백업됨' : ''}`, '', actions);
-      return true;
+      return { ok: true, res, isNewPath, backup: !!res.backup, name: cur.name, actions };
     } catch (err) {
-      hooks.toast(`저장 실패: ${err}`, 'failed');
-      return false;
+      return { ok: false, error: String(err) };
     } finally {
       S.saving = false;
     }
+  }
+
+  function reportSaved(r) {
+    const fmt = r.res.format === 'indexed' ? `인덱스 PNG ${r.res.colors}색` : 'RGBA PNG';
+    hooks.toast(`${r.name} 저장됨 · ${fmt}${r.backup ? ' · 원본 백업됨' : ''}`, '', r.actions);
+  }
+
+  // 현재 문서를 저장합니다. 성공하면 true.
+  async function save(as) {
+    if (S.fx || S.cur) return false;
+    const d = S.doc;
+    if (!d) return false;
+    const r = await saveDoc(d, as);
+    if (r.ok) { reportSaved(r); return true; }
+    if (r.error) hooks.toast(`저장 실패: ${r.error}`, 'failed');
+    return false;
+  }
+
+  // 저장하지 않은 문서를 모두 저장합니다. 경로가 없는 새 문서(제목 없음)는 저장 대화상자를 연달아 띄우지 않고 건너뛰며,
+  // 건너뛴 문서는 알림의 버튼으로 바로 저장할 수 있습니다. 하나가 실패해도 나머지는 계속 저장합니다.
+  async function saveAll() {
+    if (S.fx) { canSwitch(); return; }
+    if (S.cur || S.saving) return;
+    commitFloat();
+    const targets = dirtyDocs();
+    if (!targets.length) { hooks.toast('저장할 변경 사항이 없습니다'); return; }
+    let saved = 0, backups = 0;
+    const skipped = [], failed = [];
+    for (const d of targets) {
+      if (!d.path) { skipped.push(d); continue; }
+      const r = await saveDoc(d, false);
+      if (r.ok) { saved++; if (r.backup) backups++; }
+      else failed.push(`${d.name}: ${r.error || '취소됨'}`);
+    }
+    const parts = saved ? [`${saved}개 저장됨${backups ? ` · 원본 백업 ${backups}개` : ''}`] : [];
+    if (skipped.length) parts.push(`경로가 없는 새 문서 ${skipped.length}개는 건너뜀`);
+    if (failed.length) parts.push(`실패 ${failed.length}개 (${failed[0]})`);
+    const actions = [];
+    if (skipped.length) {
+      actions.push({ label: '건너뛴 문서 저장…', run: async () => { if (switchTo(skipped[0])) await save(true); } });
+    }
+    hooks.toast(parts.join(' · '), failed.length ? 'failed' : '', actions);
+  }
+
+  // 편집기에 파일·폴더를 끌어다 놓았을 때: 공유 목록에 더하고 첫 파일을 엽니다.
+  async function dropPaths(paths) {
+    if (S.cur || S.fx) return;
+    const list = await addAndOpen(paths);
+    if (!list.length) hooks.toast('PNG 파일을 찾지 못했습니다', 'failed');
   }
 
   // ---------- 키보드 ----------
@@ -2107,6 +2499,20 @@ export function createEditor(host, hooks) {
 
     if (e.key === 'Alt') { e.preventDefault(); return; }
     if (e.key === 'Shift' && S.drag && S.drag.kind === 'shape' && !e.repeat) { drawShape(S.drag.x, S.drag.y, true); return; }
+
+    // 파일·문서 이동은 어느 도구에서나 됩니다 (글자를 입력하는 칸에서는 제외)
+    if (!entering && !ctrl && !e.shiftKey) {
+      if (!e.altKey && (e.key === 'PageDown' || e.key === 'PageUp')) { e.preventDefault(); step(e.key === 'PageDown' ? 1 : -1); return; }
+      if (e.altKey && (e.key === 'ArrowRight' || e.key === 'ArrowLeft')) { e.preventDefault(); step(e.key === 'ArrowRight' ? 1 : -1); return; }
+    }
+    if (ctrl && e.key === 'Tab') { e.preventDefault(); cycleDoc(e.shiftKey ? -1 : 1); return; }
+    if (ctrl && !e.altKey && !e.shiftKey && k === 'w') {
+      e.preventDefault();
+      const cur = S.doc && S.docs.find((d) => d.id === S.doc.id);
+      if (cur) closeDoc(cur);
+      return;
+    }
+    if (ctrl && e.altKey && !e.shiftKey && k === 's') { e.preventDefault(); saveAll(); return; }
 
     // 효과 미리보기 중에는 확인/취소만 받습니다.
     if (S.fx) {
@@ -2174,6 +2580,7 @@ export function createEditor(host, hooks) {
       case 'l': case 'L': setTool('line'); break;
       case 'm': case 'M': setTool('select'); break;
       case 'v': setTool('move'); break;
+      case 'w': case 'W': setTool('wand'); break;
       case 'u': setTool('rect'); break;
       case 'U': setTool('ellipse'); break;
       case 'x': case 'X': swapColors(); break;
@@ -2204,21 +2611,28 @@ export function createEditor(host, hooks) {
   syncTools();
   syncColors();
   syncTop();
+  syncDocs(true);
   renderPal();
   refreshPalList();
 
   return {
-    open,
+    // 파일을 엽니다. 기본은 탐색 열기(미리보기 탭), opt.pin 이면 고정된 새 탭
+    open: (path, opt = {}) => openPath(path, opt.pin ? 'pin' : 'nav'),
     openDialog,
     newDialog,
-    confirmDiscard,
-    isDirty: () => isDirtyNow(),
+    saveAll,
+    dropPaths,
+    isDirty: () => dirtyDocs().length > 0,
+    dirtyCount: () => dirtyDocs().length,
     currentPath: () => S.doc?.path || '',
+    // 일괄 처리 목록이 바뀌었을 때(추가·제거·필터·썸네일 갱신) 파일 띠를 다시 그립니다.
+    filesChanged: () => R.strip.render(),
     activate(on) {
       S.active = on;
       if (on) {
         measure();
         syncTop();
+        syncDocs(true);
         if (S.doc && S.autoFit) fit();
         else render();
       } else {

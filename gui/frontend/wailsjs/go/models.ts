@@ -95,6 +95,8 @@ export namespace main {
 	    cols: number;
 	    gap: number;
 	    align: string;
+	    minSize: number;
+	    diagonal: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new JobRequest(source);
@@ -120,6 +122,8 @@ export namespace main {
 	        this.cols = source["cols"];
 	        this.gap = source["gap"];
 	        this.align = source["align"];
+	        this.minSize = source["minSize"];
+	        this.diagonal = source["diagonal"];
 	    }
 	}
 	export class PackResult {

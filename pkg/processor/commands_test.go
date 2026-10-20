@@ -305,3 +305,70 @@ func TestSavePaletteRefusesExisting(t *testing.T) {
 		t.Errorf("저장한 팔레트를 읽을 수 있어야 합니다: %v %v", raw, err)
 	}
 }
+
+func TestDespeckleImage(t *testing.T) {
+	red := color.NRGBA{255, 0, 0, 255}
+	blue := color.NRGBA{0, 0, 255, 128}
+	src := image.NewNRGBA(image.Rect(0, 0, 10, 8))
+	// 큰 덩어리: 3x3 (9픽셀)
+	for y := 1; y <= 3; y++ {
+		for x := 1; x <= 3; x++ {
+			src.SetNRGBA(x, y, red)
+		}
+	}
+	src.SetNRGBA(8, 1, blue)                    // 외톨이 1픽셀
+	src.SetNRGBA(7, 5, blue)                    // 대각선으로만 이어진 2픽셀
+	src.SetNRGBA(8, 6, blue)                    //
+	src.SetNRGBA(0, 7, color.NRGBA{9, 9, 9, 1}) // 알파 1 도 내용
+
+	// 8방향: 대각선 2픽셀은 한 덩어리(크기 2), 외톨이 2개(1픽셀) → 최소 2 면 외톨이 2개 제거
+	out, msg, err := DespeckleImage(src, 2, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := out.(*image.NRGBA)
+	if n.NRGBAAt(8, 1).A != 0 || n.NRGBAAt(0, 7) != (color.NRGBA{}) {
+		t.Error("외톨이가 지워지지 않음")
+	}
+	if n.NRGBAAt(7, 5) != blue || n.NRGBAAt(8, 6) != blue || n.NRGBAAt(2, 2) != red {
+		t.Error("남겨야 할 픽셀이 바뀜")
+	}
+	if msg != "조각 2개 제거 (픽셀 2개)" {
+		t.Errorf("msg = %q", msg)
+	}
+	if src.NRGBAAt(8, 1) != blue {
+		t.Error("입력 이미지가 바뀜")
+	}
+
+	// 4방향: 대각선 2픽셀도 각각 1픽셀 조각이 되어 지워짐 (4개)
+	out, msg, err = DespeckleImage(src, 2, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n = out.(*image.NRGBA); n.NRGBAAt(7, 5).A != 0 || n.NRGBAAt(8, 6).A != 0 || msg != "조각 4개 제거 (픽셀 4개)" {
+		t.Errorf("4방향 결과가 다름: %q", msg)
+	}
+
+	// 최소 크기 10: 3x3(9)도 지워져 모두 사라짐
+	out, msg, err = DespeckleImage(src, 10, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n = out.(*image.NRGBA); n.NRGBAAt(2, 2).A != 0 || msg != "조각 4개 제거 (픽셀 13개)" {
+		t.Errorf("최소 10: %q", msg)
+	}
+
+	// 지울 것이 없으면 Skip, 잘못된 값은 오류
+	if _, _, err := DespeckleImage(src, 1, true); !common.IsSkip(err) {
+		t.Errorf("minSize 1: %v", err)
+	}
+	if _, _, err := DespeckleImage(solid(4, 4, red), 4, true); !common.IsSkip(err) {
+		t.Errorf("조각 없음: %v", err)
+	}
+	if _, _, err := DespeckleImage(image.NewNRGBA(image.Rect(0, 0, 4, 4)), 3, true); !common.IsSkip(err) {
+		t.Errorf("완전 투명: %v", err)
+	}
+	if _, _, err := DespeckleImage(src, 0, true); err == nil || common.IsSkip(err) {
+		t.Errorf("minSize 0 는 오류여야 함: %v", err)
+	}
+}

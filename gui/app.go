@@ -40,7 +40,7 @@ type App struct {
 	srcCache map[string]cachedImage
 	srcOrder []string
 
-	editorDirty atomic.Bool // 편집기에 저장하지 않은 변경이 있는지
+	editorDirty atomic.Int32 // 편집기에서 저장하지 않은 문서 수
 }
 
 type loadedPalette struct {
@@ -67,7 +67,7 @@ func (a *App) startup(ctx context.Context) {
 
 // JobRequest: 화면에서 선택한 명령과 옵션입니다.
 type JobRequest struct {
-	Command   string  `json:"command"` // reduce | recolor | index | extract | downscale | upscale | trim | slice | pack
+	Command   string  `json:"command"` // reduce | recolor | index | extract | downscale | upscale | trim | despeckle | slice | pack
 	Threshold float64 `json:"threshold"`
 	MaxColors int     `json:"maxColors"` // reduce: 0 이면 Threshold 사용, 1 이상이면 최대 색상 수 기준
 	Scale     int     `json:"scale"`
@@ -85,6 +85,8 @@ type JobRequest struct {
 	Cols      int     `json:"cols"`     // pack: 열 수 (0 = 자동)
 	Gap       int     `json:"gap"`      // pack: 칸 사이 간격
 	Align     string  `json:"align"`    // pack: topleft | center
+	MinSize   int     `json:"minSize"`  // despeckle: 이보다 작은 조각을 지움
+	Diagonal  bool    `json:"diagonal"` // despeckle: 대각선도 이어진 것으로 봄
 }
 
 // InputFile: 처리할 파일과, 그 파일을 찾은 루트 폴더(직접 고른 파일이면 빈 값)입니다.
@@ -137,6 +139,7 @@ var defaultSuffixes = map[string]string{
 	"recolor":   "-recolored",
 	"upscale":   "-upscaled",
 	"trim":      "-trimmed",
+	"despeckle": "-clean",
 	"extract":   "-palette",
 }
 
@@ -340,6 +343,13 @@ func (a *App) imageFunc(req JobRequest) (func(image.Image) (image.Image, string,
 		}
 		return func(src image.Image) (image.Image, string, error) {
 			return processor.TrimImage(src, req.Pad)
+		}, nil
+	case "despeckle":
+		if req.MinSize < 1 {
+			return nil, errors.New("최소 크기는 1 이상이어야 합니다")
+		}
+		return func(src image.Image) (image.Image, string, error) {
+			return processor.DespeckleImage(src, req.MinSize, req.Diagonal)
 		}, nil
 	case "extract":
 		return processor.ExtractPaletteImage, nil

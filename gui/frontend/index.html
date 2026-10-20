@@ -72,6 +72,13 @@
             <p class="muted small">투명하지 않은 픽셀을 감싸는 영역으로 자른 뒤, 사방에 이만큼 투명 여백을 더합니다. 이미 같은 모양이거나 완전히 투명한 이미지는 건너뜁니다.</p>
           </section>
 
+          <section class="group" id="opts-despeckle" data-cmd="despeckle">
+            <label class="field-label" for="despeckle-min">이보다 픽셀 수가 적은 조각을 지움</label>
+            <input type="number" id="despeckle-min" min="1" max="100000" step="1" />
+            <label class="check small" title="끄면 상하좌우로 닿은 픽셀만 한 조각으로 봅니다"><input type="checkbox" id="despeckle-diag" /> 대각선도 이어진 것으로 (8방향)</label>
+            <p class="muted small">투명하지 않은 픽셀이 이어진 덩어리를 한 조각으로 봅니다(알파가 조금이라도 있으면 내용). 기준보다 작은 덩어리는 완전 투명으로 지우고, 지울 조각이 없는 이미지는 건너뜁니다. 예: 4 → 1~3픽셀짜리 얼룩 제거.</p>
+          </section>
+
           <section class="group" id="opts-extract" data-cmd="extract">
             <p class="muted small">이미지에 쓰인 색을 팔레트 PNG(색 1개 = 1px, 한 줄)로 뽑습니다. 많이 쓴 색부터, 투명 색은 제외하고 알파는 255로 맞춥니다. 256색을 넘으면 먼저 색상 줄이기가 필요합니다.</p>
             <label class="field-label" for="save-name">팔레트 목록에 저장 (선택)</label>
@@ -239,7 +246,7 @@
         <dl class="keys">
           <dt><kbd>Ctrl</kbd>+<kbd>Enter</kbd></dt><dd>실행</dd>
           <dt><kbd>Esc</kbd></dt><dd>작업 취소 / 닫기 / 필터 지우기</dd>
-          <dt><kbd>Alt</kbd>+<kbd>1</kbd>~<kbd>9</kbd></dt><dd>명령 전환</dd>
+          <dt><kbd>Alt</kbd>+<kbd>1</kbd>~<kbd>9</kbd> <kbd>Alt</kbd>+<kbd>0</kbd></dt><dd>명령 전환 (0 = 열 번째)</dd>
           <dt><kbd>↑</kbd> <kbd>↓</kbd></dt><dd>파일 이동</dd>
           <dt><kbd>Delete</kbd></dt><dd>목록에서 제거</dd>
           <dt><kbd>Ctrl</kbd>+<kbd>F</kbd></dt><dd>파일 이름 필터</dd>
@@ -252,6 +259,7 @@
         <dl class="keys">
           <dt><kbd>B</kbd> <kbd>E</kbd> <kbd>G</kbd> <kbd>I</kbd></dt><dd>연필 · 지우개 · 채우기 · 스포이트</dd>
           <dt><kbd>L</kbd> <kbd>U</kbd> <kbd>Shift</kbd>+<kbd>U</kbd></dt><dd>선 · 사각형 · 타원</dd>
+          <dt><kbd>W</kbd></dt><dd>마법봉 — 클릭한 곳과 같은 색 영역 선택 (<kbd>Shift</kbd> 더하기 · <kbd>Alt</kbd> 빼기). 옵션: 대각선 포함(8방향) · 전체 같은 색 · 허용 오차(채우기와 공유)</dd>
           <dt><kbd>Alt</kbd>+클릭</dt><dd>스포이트 (어느 도구에서나)</dd>
           <dt><kbd>Shift</kbd></dt><dd>선: 0/45/90° 고정 · 사각형/타원: 정사각형/원 (그리는 중에 누름)</dd>
           <dt><kbd>X</kbd></dt><dd>주 색 ↔ 보조 색 (왼쪽 버튼 = 주 색, 오른쪽 버튼 = 보조 색)</dd>
@@ -269,7 +277,16 @@
           <dt><kbd>Delete</kbd></dt><dd>선택한 픽셀 지우기</dd>
           <dt><kbd>Shift</kbd>+<kbd>H</kbd> <kbd>Shift</kbd>+<kbd>V</kbd></dt><dd>가로 · 세로 뒤집기 (선택이 없으면 이미지 전체)</dd>
         </dl>
-        <p class="muted small">회전, 캔버스 크기, 자르기, 여백 자르기는 위쪽 ‘이미지’ 메뉴, 색상 줄이기·팔레트 적용·1:1 축소·확대는 ‘효과’ 메뉴에 있습니다.</p>
+        <p class="muted small">회전, 캔버스 크기, 자르기, 여백 자르기는 위쪽 ‘이미지’ 메뉴, 색상 줄이기·팔레트 적용·1:1 축소·확대·작은 조각 지우기는 ‘효과’ 메뉴에 있습니다(조각 지우기는 선택 영역이 있으면 그 안쪽만 지움).</p>
+        <h3>편집기 — 여러 파일 연속 작업</h3>
+        <dl class="keys">
+          <dt><kbd>PageDown</kbd> <kbd>PageUp</kbd> · <kbd>Alt</kbd>+<kbd>→</kbd> <kbd>Alt</kbd>+<kbd>←</kbd></dt><dd>파일 띠(= 일괄 처리 목록)의 다음 · 이전 파일 열기 (어느 도구에서나, 끝에서는 알림만)</dd>
+          <dt><kbd>Ctrl</kbd>+<kbd>Tab</kbd> <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Tab</kbd></dt><dd>다음 · 이전 탭</dd>
+          <dt><kbd>Ctrl</kbd>+<kbd>W</kbd> · 탭의 × · 가운데 버튼</dt><dd>탭 닫기 (고친 문서는 저장 여부를 물음)</dd>
+          <dt><kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>S</kbd></dt><dd>모두 저장 — 경로가 없는 새 문서는 건너뜀</dd>
+          <dt>탭·파일 더블클릭</dt><dd>미리보기(이탤릭) 탭을 고정. 파일 띠에서 클릭하거나 PageDown 으로 연 파일은 수정하지 않았다면 다음 파일이 같은 탭을 대신하고, 고치면 탭이 고정됩니다</dd>
+        </dl>
+        <p class="muted small">파일 띠 아래의 ‘넘어갈 때 자동 저장’은 PageDown/PageUp 으로 넘어갈 때 고친 파일을 먼저 저장하고(백업 설정 적용), ‘확대 유지’는 다음 파일을 같은 확대 배율로 엽니다. 파일 띠와 일괄 처리 목록은 같은 목록입니다.</p>
         <h3>편집기 — 보기·파일</h3>
         <dl class="keys">
           <dt><kbd>Ctrl</kbd>+휠 · <kbd>+</kbd> <kbd>-</kbd></dt><dd>확대/축소 (커서 위치 기준)</dd>
@@ -279,7 +296,7 @@
           <dt><kbd>Ctrl</kbd>+<kbd>Z</kbd></dt><dd>실행 취소</dd>
           <dt><kbd>Ctrl</kbd>+<kbd>Y</kbd> <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd></dt><dd>다시 실행</dd>
           <dt><kbd>Ctrl</kbd>+<kbd>S</kbd> <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd></dt><dd>저장 · 다른 이름으로 저장</dd>
-          <dt><kbd>Ctrl</kbd>+<kbd>O</kbd> <kbd>Ctrl</kbd>+<kbd>N</kbd></dt><dd>열기 · 새로 만들기</dd>
+          <dt><kbd>Ctrl</kbd>+<kbd>O</kbd> <kbd>Ctrl</kbd>+<kbd>N</kbd></dt><dd>열기 · 새로 만들기 (열린 문서는 그대로, 새 탭으로)</dd>
         </dl>
       </div>
     </div>

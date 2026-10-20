@@ -47,3 +47,5 @@ export function SaveImageRGBA(arg1:string,arg2:number,arg3:number,arg4:string,ar
 export function SavePaletteColors(arg1:string,arg2:Array<string>,arg3:boolean):Promise<main.PaletteInfo>;
 
 export function SetEditorDirty(arg1:boolean):Promise<void>;
+
+export function SetEditorDirtyCount(arg1:number):Promise<void>;

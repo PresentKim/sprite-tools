@@ -136,8 +136,8 @@ export function ellipseOutline(x0, y0, x1, y1, emit) {
 
 // ---------- 채우기 ----------
 
-// 시작 픽셀과 같은(허용 오차 이내) 이어진 영역의 픽셀 번호들. 이어짐은 상하좌우 4방향입니다.
-export function floodContiguous(px32, w, h, sx, sy, tol) {
+// 시작 픽셀과 같은(허용 오차 이내) 이어진 영역의 픽셀 번호들. 이어짐은 기본 상하좌우 4방향이고, diag 면 대각선까지 8방향입니다.
+export function floodContiguous(px32, w, h, sx, sy, tol, diag = false) {
   const seed = norm(px32[sy * w + sx]);
   const match = tol > 0 ? (c) => diff(c, seed) <= tol : (c) => norm(c) === seed;
   const seen = new Uint8Array(w * h);
@@ -153,6 +153,13 @@ export function floodContiguous(px32, w, h, sx, sy, tol) {
     if (x < w - 1 && !seen[i + 1]) { seen[i + 1] = 1; stack.push(i + 1); }
     if (y > 0 && !seen[i - w]) { seen[i - w] = 1; stack.push(i - w); }
     if (y < h - 1 && !seen[i + w]) { seen[i + w] = 1; stack.push(i + w); }
+    if (diag) {
+      const l = x > 0, r = x < w - 1;
+      if (y > 0 && l && !seen[i - w - 1]) { seen[i - w - 1] = 1; stack.push(i - w - 1); }
+      if (y > 0 && r && !seen[i - w + 1]) { seen[i - w + 1] = 1; stack.push(i - w + 1); }
+      if (y < h - 1 && l && !seen[i + w - 1]) { seen[i + w - 1] = 1; stack.push(i + w - 1); }
+      if (y < h - 1 && r && !seen[i + w + 1]) { seen[i + w + 1] = 1; stack.push(i + w + 1); }
+    }
   }
   return out;
 }

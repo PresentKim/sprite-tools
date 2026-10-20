@@ -136,3 +136,43 @@ export function extractPix(px32, W, H, s) {
   }
   return out;
 }
+
+// 픽셀 번호 목록(y*W+x)으로 선택을 만듭니다. 비어 있으면 null.
+export function fromIndices(list, W) {
+  if (!list.length) return null;
+  let x0 = Infinity, y0 = Infinity, x1 = -1, y1 = -1;
+  for (const i of list) {
+    const x = i % W, y = (i / W) | 0;
+    if (x < x0) x0 = x;
+    if (x > x1) x1 = x;
+    if (y < y0) y0 = y;
+    if (y > y1) y1 = y;
+  }
+  const w = x1 - x0 + 1, h = y1 - y0 + 1;
+  const mask = new Uint8Array(w * h);
+  for (const i of list) mask[(((i / W) | 0) - y0) * w + (i % W) - x0] = 1;
+  return makeSel(x0, y0, w, h, mask);
+}
+
+// 선택 a 에 선택 b 를 합칩니다. mode: replace(b 로 바꿈) | add(합집합) | sub(a 에서 b 를 뺌)
+export function combineSels(a, b, mode) {
+  if (mode === 'replace' || !a) return mode === 'sub' ? null : b;
+  if (!b) return a;
+  if (mode === 'add') {
+    const nl = Math.min(a.x, b.x), nt = Math.min(a.y, b.y);
+    const nr = Math.max(a.x + a.w, b.x + b.w), nb = Math.max(a.y + a.h, b.y + b.h);
+    const nw = nr - nl, nh = nb - nt;
+    const out = new Uint8Array(nw * nh);
+    for (const s of [a, b]) {
+      for (let y = 0; y < s.h; y++) {
+        for (let x = 0; x < s.w; x++) if (s.mask[y * s.w + x]) out[(s.y - nt + y) * nw + (s.x - nl + x)] = 1;
+      }
+    }
+    return makeSel(nl, nt, nw, nh, out);
+  }
+  const out = a.mask.slice();
+  for (let y = 0; y < a.h; y++) {
+    for (let x = 0; x < a.w; x++) if (out[y * a.w + x] && selHas(b, a.x + x, a.y + y)) out[y * a.w + x] = 0;
+  }
+  return tighten(makeSel(a.x, a.y, a.w, a.h, out));
+}

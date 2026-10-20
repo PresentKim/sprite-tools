@@ -41,6 +41,23 @@ func runTrim(args []string) int {
 	})
 }
 
+func runDespeckle(args []string) int {
+	fs, _ := newFlagSet("despeckle")
+	minSize := fs.Int("min", 4, "이보다 픽셀 수가 적은 조각을 지움 (1 이상)")
+	diagonal := fs.Bool("diagonal", true, "대각선으로 닿은 픽셀도 같은 조각으로 봄 (끄려면 -diagonal=false)")
+	b := addBatchFlags(fs, "-clean", modeOutput)
+	roots, code, ok := parseOrExit(fs, args)
+	if !ok {
+		return code
+	}
+	if *minSize < 1 {
+		return usageError(fs, "-min 은 1 이상이어야 합니다")
+	}
+	return execute(b, roots, func(in, out string) (string, error) {
+		return processor.Despeckle(in, out, *minSize, *diagonal)
+	})
+}
+
 func runExtract(args []string) int {
 	fs, _ := newFlagSet("extract")
 	save := fs.String("save", "", "공용 팔레트 폴더에도 이 이름으로 저장 (recolor -p <이름> 으로 사용, 영문 소문자/숫자/'-')")
