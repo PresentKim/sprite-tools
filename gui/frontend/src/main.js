@@ -1,7 +1,7 @@
 import './style.css';
 import {
   Cancel, DefaultSuffix, Describe, ExpandPaths, ListPalettes, LoadPalette,
-  PickFiles, PickFolder, PickPaletteFile, Preview, PreviewPack, Reveal, Run, RunPack,
+  PickFiles, PickFolder, PickPaletteFile, Preview, PreviewPack, RestoreBackups, Reveal, Run, RunPack,
 } from '../wailsjs/go/main/App';
 import { BrowserOpenURL, EventsOn, OnFileDrop } from '../wailsjs/runtime/runtime';
 
@@ -21,7 +21,7 @@ const COMMANDS = [
 const FRAME_PRESETS = ['8', '16', '24', '32', '48', '64', '16x32'];
 const SCALES = [0, 2, 3, 4, 5, 6, 8, 10, 12, 16];
 const UPSCALES = [2, 3, 4, 5, 6, 8, 10, 12, 16];
-const ZOOMS = [['fit', '맞춤'], [1, '1x'], [2, '2x'], [4, '4x'], [8, '8x']];
+const ZOOMS = [['fit', '맞춤'], [1, '1x'], [2, '2x'], [4, '4x'], [8, '8x'], [16, '16x']];
 const STATUS_LABEL = { done: '완료', skipped: '건너뜀', failed: '실패', running: '처리 중' };
 
 const $ = (id) => document.getElementById(id);
@@ -51,6 +51,7 @@ const defaults = {
   palette: '',
   outMode: 'suffix', // suffix | dir | inplace
   exportDir: '', // 다른 폴더에 저장할 때의 폴더
+  backup: true, // 원본 덮어쓰기 전에 백업
   suffixes: {},
   threads: 0,
   recursive: true,
@@ -62,6 +63,10 @@ const state = {
   selected: null,
   running: false,
   palettes: [],
+  filter: '', // 파일 이름 필터 (소문자)
+  onlyShown: false, // 필터가 켜져 있을 때 보이는 파일만 실행
+  backups: [], // 마지막 덮어쓰기 실행에서 만든 백업 {path, backup}
+  backupDirs: [],
 };
 
 function loadSettings() {
@@ -110,6 +115,7 @@ function request() {
     palette: settings.palette,
     suffix: settings.suffixes[cmd] ?? '',
     inPlace: mode === 'inplace',
+    backup: mode === 'inplace' && settings.backup,
     threads: Number(settings.threads) || 0,
     pad: Math.max(0, Math.round(Number(settings.pad)) || 0),
     saveName: cmd === 'extract' ? $('save-name').value.trim() : '',
@@ -164,7 +170,11 @@ function renderOutput() {
   document.querySelectorAll('input[name="out-mode"]').forEach((r) => { r.checked = r.value === mode; });
   $('suffix-box').hidden = mode === 'inplace';
   $('export-dir-box').hidden = mode !== 'dir';
-  $('inplace-warn').hidden = mode !== 'inplace';
+  $('inplace-box').hidden = mode !== 'inplace';
+  $('backup').checked = settings.backup;
+  $('inplace-warn').textContent = settings.backup
+    ? '각 파일 옆의 .sprite-tools-backup 폴더에 원본을 복사해 둡니다. 실행 직후 되돌릴 수 있습니다.'
+    : '원본 파일이 바뀝니다. 되돌릴 수 없습니다.';
   const sfx = settings.suffixes[settings.command] ?? '';
   if (mode === 'dir') {
     $('suffix-example').textContent = `hero.png → (폴더)/hero${sfx}.png` + (sfx ? '' : ' · 접미사는 비워도 됩니다');
@@ -258,6 +268,7 @@ function initOptions() {
     const dir = await PickFolder('저장할 폴더 선택');
     if (dir) { settings.exportDir = dir; saveSettings(); renderOutput(); }
   };
+  $('backup').onchange = (e) => { settings.backup = e.target.checked; saveSettings(); renderOutput(); };
   $('suffix').oninput = (e) => { settings.suffixes[settings.command] = e.target.value; saveSettings(); renderOutput(); };
 
   $('out-dir-pick').onclick = async () => {
@@ -310,7 +321,7 @@ function initOptions() {
   const seg = $('zoom-seg');
   ZOOMS.forEach(([z, label]) => {
     const b = el('button', '', label);
-    b.onclick = () => { settings.zoom = z; saveSettings(); renderZoom(); layoutImages(); };
+    b.onclick = () => setZoom(z);
     b.dataset.zoom = z;
     seg.append(b);
   });
@@ -411,11 +422,27 @@ function select(path, scroll) {
   schedulePreview();
 }
 
+// 필터에 맞는(화면에 보이는) 파일들입니다. 필터가 없으면 전부입니다.
+function visibleFiles() {
+  return state.filter ? state.files.filter((f) => f.name.toLowerCase().includes(state.filter)) : state.files;
+}
+
+// 실행·시트 합치기의 대상: 오류 없는 파일 전부. 필터가 켜져 있고 '보이는 파일만' 이 켜진 경우에만 보이는 파일로 좁힙니다.
+function runTargets() {
+  const base = state.filter && state.onlyShown ? visibleFiles() : state.files;
+  return base.filter((f) => !f.error);
+}
+
 function removeFile(path) {
   const i = state.files.findIndex((f) => f.path === path);
   if (i < 0) return;
+  const vis = visibleFiles();
+  const vi = vis.findIndex((f) => f.path === path);
   state.files.splice(i, 1);
-  if (state.selected === path) state.selected = state.files[Math.min(i, state.files.length - 1)]?.path ?? null;
+  if (state.selected === path) {
+    const rest = visibleFiles();
+    state.selected = (rest.length ? rest[Math.min(Math.max(vi, 0), rest.length - 1)] : state.files[Math.min(i, state.files.length - 1)])?.path ?? null;
+  }
   renderFiles();
   schedulePreview();
 }
@@ -458,10 +485,23 @@ function fileRow(f) {
 
 function renderFiles() {
   const list = $('file-list');
-  list.replaceChildren(...state.files.map(fileRow));
+  const shown = visibleFiles();
+  list.replaceChildren(...shown.map(fileRow));
+  if (state.files.length && !shown.length) {
+    list.append(el('div', 'no-match', `'${$('file-filter').value.trim()}' 와 이름이 맞는 파일이 없습니다`));
+  }
   $('empty').hidden = state.files.length > 0;
-  $('file-count').textContent = state.files.length ? `${state.files.length}개` : '';
+  $('file-count').textContent = !state.files.length ? ''
+    : state.filter ? `표시 ${shown.length} / 전체 ${state.files.length}` : `${state.files.length}개`;
   renderRunButton();
+}
+
+function setFilter(text) {
+  const t = text.trim().toLowerCase();
+  if (t === state.filter) return;
+  state.filter = t;
+  renderFiles();
+  schedulePreview(); // 시트 합치기 미리보기는 대상 파일이 바뀔 수 있음
 }
 
 function updateRow(f) {
@@ -482,7 +522,7 @@ function schedulePreview() {
 async function runPreview() {
   const f = selectedFile();
   const packing = settings.command === 'pack';
-  const valid = state.files.filter((x) => !x.error);
+  const valid = runTargets();
   const seq = ++previewSeq;
   const origImg = $('orig-img');
   const resImg = $('result-img');
@@ -492,6 +532,8 @@ async function runPreview() {
   if (!f || (packing && !valid.length)) {
     $('preview-name').textContent = '미리보기';
     origImg.hidden = resImg.hidden = true;
+    state.hasResult = false;
+    applyCompare();
     $('orig-meta').textContent = $('result-meta').textContent = '';
     setMsg(msg, '', '파일을 선택하면 처리 결과를 미리 볼 수 있습니다');
     $('result-colors').replaceChildren();
@@ -504,9 +546,12 @@ async function runPreview() {
   if (origImg.dataset.src !== origSrc) {
     origImg.dataset.src = origSrc;
     origImg.src = origSrc;
+    $('compare-img').src = origSrc; // 길게 눌러 비교할 때 바로 보이도록 미리 불러 둠
   }
   origImg.dataset.w = f.width;
   origImg.dataset.h = f.height;
+  $('compare-img').dataset.w = f.width;
+  $('compare-img').dataset.h = f.height;
   origImg.hidden = !f.width;
   $('orig-meta').textContent = f.width ? `${f.width}×${f.height}` : '';
 
@@ -520,6 +565,7 @@ async function runPreview() {
   if (seq !== previewSeq) return; // 더 최신 요청이 있음
   $('spinner').classList.remove('on');
 
+  state.hasResult = res.status === 'done';
   if (res.status === 'done') {
     resImg.src = res.image;
     resImg.dataset.w = res.width;
@@ -534,6 +580,7 @@ async function runPreview() {
   }
   renderColors(res.colors);
   layoutImages();
+  applyCompare();
 }
 
 function setMsg(box, cls, text) {
@@ -565,13 +612,158 @@ function fitScale(w, h, box) {
 
 // 두 영역은 크기가 같으므로, 같은 크기의 이미지는 맞춤 모드에서도 같은 배율로 표시됩니다.
 function layoutImages() {
-  for (const [img, box] of [[$('orig-img'), $('orig-canvas')], [$('result-img'), $('result-canvas')]]) {
+  for (const [img, box] of [[$('orig-img'), $('orig-canvas')], [$('result-img'), $('result-canvas')], [$('compare-img'), $('result-canvas')]]) {
     const w = Number(img.dataset.w), h = Number(img.dataset.h);
     if (!w || !h) continue;
     const s = settings.zoom === 'fit' ? fitScale(w, h, box) : Number(settings.zoom);
     img.style.width = `${w * s}px`;
     img.style.height = `${h * s}px`;
   }
+}
+
+function setZoom(z) {
+  settings.zoom = z;
+  saveSettings();
+  renderZoom();
+  layoutImages();
+}
+
+// ---------- 미리보기 상호작용 ----------
+
+// 픽셀 검사: 이미지를 오프스크린 캔버스에 한 번 그려 두고 거기서 색을 읽습니다. 이미지를 새로 불러오면 다시 그립니다.
+const pixelCache = new WeakMap(); // img -> {w, h, data}
+function pixelData(img) {
+  let c = pixelCache.get(img);
+  if (c) return c;
+  if (!img.complete || !img.naturalWidth) return null;
+  c = { w: 0, h: 0, data: null };
+  try {
+    const cv = document.createElement('canvas');
+    cv.width = img.naturalWidth;
+    cv.height = img.naturalHeight;
+    const ctx = cv.getContext('2d', { willReadFrequently: true });
+    ctx.drawImage(img, 0, 0);
+    c = { w: cv.width, h: cv.height, data: ctx.getImageData(0, 0, cv.width, cv.height).data };
+  } catch { /* 너무 크거나 읽을 수 없으면 좌표만 표시 */ }
+  pixelCache.set(img, c);
+  return c;
+}
+
+const hex2 = (n) => n.toString(16).padStart(2, '0');
+
+function clearProbe(canvas) {
+  const key = canvas.id === 'orig-canvas' ? 'orig' : 'result';
+  $(`${key}-probe`).hidden = true;
+  $(`${key}-meta`).hidden = false;
+}
+
+// 캔버스 위의 마우스 위치를 이미지 픽셀 좌표로 바꿔 캡션에 좌표·색상·알파를 보여줍니다.
+function probe(canvas, clientX, clientY) {
+  const key = canvas.id === 'orig-canvas' ? 'orig' : 'result';
+  const img = [...canvas.querySelectorAll('img')].find((i) => !i.hidden && i.naturalWidth);
+  if (!img) { clearProbe(canvas); return; }
+  const r = img.getBoundingClientRect();
+  if (clientX < r.left || clientX >= r.right || clientY < r.top || clientY >= r.bottom) { clearProbe(canvas); return; }
+  const x = Math.min(img.naturalWidth - 1, Math.floor((clientX - r.left) * img.naturalWidth / r.width));
+  const y = Math.min(img.naturalHeight - 1, Math.floor((clientY - r.top) * img.naturalHeight / r.height));
+  const box = $(`${key}-probe`);
+  box.replaceChildren();
+  const px = pixelData(img);
+  if (px && px.data) {
+    const i = (y * px.w + x) * 4;
+    const [R, G, B, A] = [px.data[i], px.data[i + 1], px.data[i + 2], px.data[i + 3]];
+    const sw = el('i', 'probe-sw');
+    sw.style.setProperty('--c', `rgba(${R},${G},${B},${A / 255})`);
+    box.append(sw, `${x}, ${y}  #${hex2(R)}${hex2(G)}${hex2(B)}  α${A}`);
+  } else {
+    box.append(`${x}, ${y}`);
+  }
+  box.hidden = false;
+  $(`${key}-meta`).hidden = true;
+}
+
+// 길게 눌러 비교: 마우스(결과 창)나 Space 를 누르고 있는 동안 결과 창에 원본을 보여줍니다.
+function applyCompare() {
+  const on = (state.cmpMouse || state.cmpKey) && state.hasResult && !$('orig-img').hidden;
+  $('compare-img').hidden = !on;
+  $('result-img').hidden = on || !state.hasResult;
+  $('result-title').textContent = on ? '결과 · 원본 보는 중' : '결과';
+  $('result-pane').classList.toggle('comparing', !!on);
+  layoutImages();
+}
+
+function setCompare(kind, on) {
+  if (!!state[kind] === on) return;
+  state[kind] = on;
+  applyCompare();
+}
+
+// 확대 상태에서 한쪽을 스크롤하면 다른 쪽도 같은 비율로 따라가게 합니다. 코드가 만든 스크롤이 되돌아와 다시 동기화되지 않도록 기억해 둡니다.
+let syncEcho = null;
+function linkScroll(a, b) {
+  a.addEventListener('scroll', () => {
+    if (settings.zoom === 'fit') return;
+    if (syncEcho && syncEcho.el === a && syncEcho.l === a.scrollLeft && syncEcho.t === a.scrollTop) { syncEcho = null; return; }
+    const ax = a.scrollWidth - a.clientWidth, ay = a.scrollHeight - a.clientHeight;
+    const bx = b.scrollWidth - b.clientWidth, by = b.scrollHeight - b.clientHeight;
+    const l = ax > 0 && bx > 0 ? Math.round((a.scrollLeft / ax) * bx) : b.scrollLeft;
+    const t = ay > 0 && by > 0 ? Math.round((a.scrollTop / ay) * by) : b.scrollTop;
+    if (l === b.scrollLeft && t === b.scrollTop) return;
+    b.scrollLeft = l;
+    b.scrollTop = t;
+    syncEcho = { el: b, l: b.scrollLeft, t: b.scrollTop };
+  });
+}
+
+// Ctrl+휠: 확대 단계(맞춤 → 1x … 16x)를 한 칸씩 바꿉니다. 보던 가운데 위치는 유지합니다.
+let wheelAt = 0;
+function wheelZoom(e) {
+  if (!e.ctrlKey) return;
+  e.preventDefault();
+  const now = performance.now();
+  if (now - wheelAt < 90) return; // 트랙패드가 쏟아내는 이벤트를 한 단계로 묶음
+  const i = ZOOMS.findIndex(([z]) => String(z) === String(settings.zoom));
+  const j = Math.max(0, Math.min(ZOOMS.length - 1, i + (e.deltaY < 0 ? 1 : -1)));
+  if (j === i) return;
+  wheelAt = now;
+  const pane = e.target.closest('.canvas') || $('orig-canvas');
+  const cx = pane.scrollWidth ? (pane.scrollLeft + pane.clientWidth / 2) / pane.scrollWidth : 0.5;
+  const cy = pane.scrollHeight ? (pane.scrollTop + pane.clientHeight / 2) / pane.scrollHeight : 0.5;
+  setZoom(ZOOMS[j][0]);
+  if (settings.zoom !== 'fit') {
+    for (const c of [$('orig-canvas'), $('result-canvas')]) {
+      c.scrollLeft = cx * c.scrollWidth - c.clientWidth / 2;
+      c.scrollTop = cy * c.scrollHeight - c.clientHeight / 2;
+    }
+  }
+}
+
+function initPreviewInteraction() {
+  const canvases = [$('orig-canvas'), $('result-canvas')];
+  for (const canvas of canvases) {
+    let last = null;
+    canvas.addEventListener('mousemove', (e) => { last = [e.clientX, e.clientY]; probe(canvas, e.clientX, e.clientY); });
+    canvas.addEventListener('mouseleave', () => { last = null; clearProbe(canvas); });
+    canvas.addEventListener('scroll', () => { if (last) probe(canvas, last[0], last[1]); });
+  }
+  for (const img of [$('orig-img'), $('result-img'), $('compare-img')]) {
+    img.addEventListener('load', () => { pixelCache.delete(img); });
+  }
+  $('orig-img').addEventListener('load', layoutImages);
+
+  const rc = $('result-canvas');
+  rc.addEventListener('mousedown', (e) => {
+    if (e.button !== 0) return;
+    const r = rc.getBoundingClientRect();
+    if (e.clientX - r.left >= rc.clientWidth || e.clientY - r.top >= rc.clientHeight) return; // 스크롤바
+    setCompare('cmpMouse', true);
+  });
+  window.addEventListener('mouseup', () => setCompare('cmpMouse', false));
+  window.addEventListener('blur', () => { setCompare('cmpMouse', false); setCompare('cmpKey', false); });
+
+  linkScroll($('orig-canvas'), $('result-canvas'));
+  linkScroll($('result-canvas'), $('orig-canvas'));
+  document.querySelector('.compare').addEventListener('wheel', wheelZoom, { passive: false });
 }
 
 // ---------- 실행 ----------
@@ -582,20 +774,28 @@ function renderRunButton() {
     b.textContent = '취소';
     b.className = 'btn danger run';
     b.disabled = false;
+    $('only-shown-box').hidden = true;
     $('run-hint').textContent = 'Esc';
     return;
   }
-  const n = state.files.filter((f) => !f.error).length;
+  // 필터가 켜져 있어도 기본은 목록 전체를 처리합니다. 버튼에 '전체'를 적어 두고, 체크하면 보이는 파일만 처리합니다.
+  const filtered = !!state.filter;
+  const total = state.files.filter((f) => !f.error).length;
+  const shown = visibleFiles().filter((f) => !f.error).length;
+  const n = runTargets().length;
+  $('only-shown-box').hidden = !filtered;
+  $('only-shown').checked = state.onlyShown;
+  $('only-shown-label').textContent = `보이는 ${shown}개만 실행`;
   const label = cmdInfo().label;
-  b.textContent = n ? `${label} 실행 · ${n}개` : `${label} 실행`;
+  b.textContent = n ? `${label} 실행 · ${filtered && !state.onlyShown ? '전체 ' : ''}${n}개` : `${label} 실행`;
   b.className = 'btn primary run';
   b.disabled = n === 0 || !!state.packing;
-  $('run-hint').textContent = 'Ctrl+Enter';
+  $('run-hint').textContent = filtered && !state.onlyShown ? `필터와 관계없이 전체 ${total}개 처리 · Ctrl+Enter` : 'Ctrl+Enter';
 }
 
 async function startRun() {
   if (state.running) return;
-  const targets = state.files.filter((f) => !f.error);
+  const targets = runTargets();
   if (!targets.length) return;
   if (settings.command === 'recolor' && !settings.palette) {
     toast('먼저 팔레트를 선택하세요', 'failed');
@@ -615,10 +815,14 @@ async function startRun() {
     return;
   }
   if (mode === 'inplace' &&
-      !confirm(`원본 ${targets.length}개 파일을 덮어씁니다. 계속할까요?`)) return;
+      !confirm(`원본 ${targets.length}개 파일을 덮어씁니다. ${settings.backup ? '원본은 백업 폴더에 복사해 둡니다.' : '백업하지 않으면 되돌릴 수 없습니다.'} 계속할까요?`)) return;
 
   targets.forEach((f) => { f.status = 'running'; f.message = ''; });
   renderFiles();
+  // 실행 중에 설정을 바꿔도 결과 안내가 어긋나지 않도록 이번 실행의 설정을 기억해 둡니다.
+  state.run = { mode, cmd: settings.command, exportDir: settings.exportDir, outDir: settings.outDir, saveName: $('save-name').value.trim() };
+  state.backups = [];
+  state.backupDirs = [];
   try {
     await Run(request(), targets.map((f) => ({ path: f.path, root: f.root || '' })));
   } catch (err) {
@@ -645,7 +849,10 @@ async function runPack(targets) {
       $('status-text').textContent = '취소됨';
     } else {
       $('status-text').textContent = r.message;
-      toast(r.message, '', { label: '폴더 열기', run: () => Reveal(r.output) });
+      toast(r.message, '', [
+        { label: '폴더 열기', run: () => Reveal(r.output) },
+        { label: '결과를 목록에 추가', run: () => addPaths([r.output]) },
+      ]);
     }
   } catch (err) {
     $('status-text').textContent = '실패';
@@ -670,6 +877,7 @@ EventsOn('job:result', (r) => {
     updateRow(f);
   }
   if (r.status === 'done') state.lastOutput = r.output || r.input;
+  if (r.backup) state.backups.push({ path: r.input, backup: r.backup });
   setProgress(r.completed, r.total);
 });
 
@@ -680,7 +888,9 @@ EventsOn('job:done', async (s) => {
   renderRunButton();
 
   // 덮어쓴 파일은 크기·썸네일을 새로 읽습니다.
-  const mode = effMode();
+  const run = state.run || { mode: effMode(), cmd: settings.command, exportDir: settings.exportDir, outDir: settings.outDir, saveName: '' };
+  const mode = run.mode;
+  state.backupDirs = s.backupDirs || [];
   if (mode === 'inplace') {
     const done = state.files.filter((f) => f.status === 'done');
     const fresh = await Describe(done.map((f) => f.path));
@@ -692,37 +902,78 @@ EventsOn('job:done', async (s) => {
   const text = `${s.canceled ? '취소됨 · ' : ''}완료 ${s.done} · 건너뜀 ${s.skipped} · 실패 ${s.failed}`;
   $('status-text').textContent = text;
   $('status-right').textContent = `${s.seconds.toFixed(1)}초`;
-  let action = null;
-  if (mode === 'dir' && s.done && settings.exportDir) {
-    action = { label: '폴더 열기', run: () => Reveal(settings.exportDir) };
-  } else if (mode === 'suffix' && state.lastOutput) {
-    action = { label: '결과 폴더 열기', run: () => Reveal(state.lastOutput) };
-  } else if (settings.command === 'slice' && s.done) {
-    action = { label: '폴더 열기', run: () => Reveal(settings.outDir || state.lastOutput) };
+  const actions = [];
+  if (mode === 'inplace') {
+    if (state.backups.length) {
+      const pairs = state.backups.slice();
+      actions.push({ label: '되돌리기', run: () => restoreBackups(pairs) });
+      if (state.backupDirs.length) actions.push({ label: '백업 폴더 열기', run: () => Reveal(state.backupDirs[0]) });
+    }
+  } else {
+    if (mode === 'dir' && s.done && run.exportDir) {
+      actions.push({ label: '폴더 열기', run: () => Reveal(run.exportDir) });
+    } else if (mode === 'suffix' && state.lastOutput) {
+      actions.push({ label: '결과 폴더 열기', run: () => Reveal(state.lastOutput) });
+    } else if (run.cmd === 'slice' && s.done) {
+      actions.push({ label: '폴더 열기', run: () => Reveal(run.outDir || state.lastOutput) });
+    }
+    if (s.outputs && s.outputs.length) {
+      const outputs = s.outputs.slice();
+      actions.push({ label: '결과를 목록에 추가', run: () => addPaths(outputs) });
+    }
   }
-  toast(text, s.failed ? 'failed' : '', action);
+  toast(text, s.failed ? 'failed' : '', actions);
 
   // 팔레트 추출에서 이름을 주고 저장했다면 팔레트 목록을 새로 읽습니다.
-  if (settings.command === 'extract' && s.done) {
-    const saved = $('save-name').value.trim().toLowerCase();
+  if (run.cmd === 'extract' && s.done) {
+    const saved = run.saveName.toLowerCase();
     if (saved) await refreshPalettes(saved);
   }
 });
 
 // ---------- 공통 UI ----------
 
+// 덮어쓴 원본을 백업에서 되돌리고, 목록의 크기·썸네일·미리보기를 새로 읽습니다.
+async function restoreBackups(pairs) {
+  try {
+    const rep = await RestoreBackups(pairs);
+    const fresh = await Describe(pairs.map((p) => p.path));
+    fresh.forEach((e, i) => {
+      const f = state.files.find((x) => x.path === pairs[i].path);
+      if (f) Object.assign(f, e, { root: f.root, v: Date.now(), status: '', message: '' });
+    });
+    if (rep.restored === pairs.length) state.backups = []; // 같은 백업을 두 번 되돌리지 않도록 함
+    renderFiles();
+    schedulePreview();
+    const err = rep.errors && rep.errors.length ? ` · 실패 ${rep.errors.length}: ${rep.errors[0]}` : '';
+    $('status-text').textContent = `원본 ${rep.restored}개를 되돌렸습니다`;
+    toast(`원본 ${rep.restored}개를 되돌렸습니다${err}`, err ? 'failed' : '');
+  } catch (err) {
+    toast(String(err), 'failed');
+  }
+}
+
+// actions: {label, run} 하나 또는 배열. 버튼을 누르면 알림을 닫고 동작을 실행합니다. 버튼이 있으면 더 오래 보여줍니다.
 let toastTimer = 0;
-function toast(text, cls = '', action = null) {
+function toast(text, cls = '', actions = null) {
+  const list = !actions ? [] : Array.isArray(actions) ? actions : [actions];
   const t = $('toast');
   t.className = `toast on ${cls}`;
   t.replaceChildren(el('span', '', text));
-  if (action) {
+  for (const action of list) {
     const b = el('button', 'btn small', action.label);
-    b.onclick = () => { action.run(); t.className = 'toast'; };
+    b.onclick = () => { t.className = 'toast'; action.run(); };
     t.append(b);
   }
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => { t.className = 'toast'; }, action ? 7000 : 3500);
+  toastTimer = setTimeout(() => { t.className = 'toast'; }, list.length ? 10000 : 3500);
+}
+
+// ---------- 단축키 도움말 ----------
+
+function toggleHelp(open = $('help').hidden) {
+  $('help').hidden = !open;
+  if (open) $('help-close').focus();
 }
 
 function initGlobal() {
@@ -730,6 +981,19 @@ function initGlobal() {
   $('add-folder').onclick = async () => { const d = await PickFolder('이미지 폴더 선택'); if (d) addPaths([d]); };
   $('clear-files').onclick = () => { state.files = []; state.selected = null; renderFiles(); schedulePreview(); };
   $('run-btn').onclick = () => (state.running ? Cancel() : startRun());
+  $('only-shown').onchange = (e) => { state.onlyShown = e.target.checked; renderRunButton(); schedulePreview(); };
+
+  const filter = $('file-filter');
+  filter.oninput = () => setFilter(filter.value);
+  filter.onkeydown = (e) => {
+    if (e.key !== 'Escape') return;
+    if (filter.value) { filter.value = ''; setFilter(''); e.stopPropagation(); } // 실행 취소로 번지지 않게 함
+    else filter.blur();
+  };
+
+  $('help-btn').onclick = () => toggleHelp();
+  $('help-close').onclick = () => toggleHelp(false);
+  $('help').addEventListener('mousedown', (e) => { if (e.target === $('help')) toggleHelp(false); });
 
   // 파일 드롭 (Wails 가 실제 경로를 전달)
   const overlay = $('drop-overlay');
@@ -741,23 +1005,40 @@ function initGlobal() {
   OnFileDrop((_x, _y, paths) => { depth = 0; overlay.classList.remove('on'); addPaths(paths); }, false);
 
   window.addEventListener('keydown', (e) => {
-    const typing = ['INPUT', 'SELECT', 'TEXTAREA'].includes(document.activeElement?.tagName);
+    const active = document.activeElement;
+    const typing = ['INPUT', 'SELECT', 'TEXTAREA'].includes(active?.tagName);
+    // 글자를 입력하는 칸 (체크박스·라디오·슬라이더는 제외)
+    const entering = active?.tagName === 'SELECT' || active?.tagName === 'TEXTAREA' ||
+      (active?.tagName === 'INPUT' && !['checkbox', 'radio', 'range', 'button'].includes(active.type));
+    if (e.key === 'Escape' && !$('help').hidden) { toggleHelp(false); return; }
+    if (e.key === 'F1' || (e.key === '?' && !entering)) { e.preventDefault(); toggleHelp(); return; }
+    if (!$('help').hidden) return; // 도움말이 열려 있으면 다른 단축키는 막음
+    if (e.ctrlKey && e.key.toLowerCase() === 'f') { e.preventDefault(); $('file-filter').focus(); $('file-filter').select(); return; }
     if (e.ctrlKey && e.key === 'Enter') { e.preventDefault(); startRun(); return; }
     if (e.key === 'Escape' && state.running) { Cancel(); return; }
+    if (e.code === 'Space' && !entering && !e.ctrlKey && !e.altKey && !e.metaKey) {
+      e.preventDefault(); // 버튼이 눌리거나 목록이 스크롤되는 것을 막음
+      if (!e.repeat) setCompare('cmpKey', true);
+      return;
+    }
     if (e.altKey && /^[1-9]$/.test(e.key) && Number(e.key) <= COMMANDS.length) { e.preventDefault(); setCommand(COMMANDS[Number(e.key) - 1].id); return; }
     if (typing) return;
-    const i = state.files.findIndex((f) => f.path === state.selected);
+    const vis = visibleFiles();
+    const i = vis.findIndex((f) => f.path === state.selected);
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
       e.preventDefault();
-      const next = state.files[Math.max(0, Math.min(state.files.length - 1, i + (e.key === 'ArrowDown' ? 1 : -1)))];
+      const next = vis[Math.max(0, Math.min(vis.length - 1, i + (e.key === 'ArrowDown' ? 1 : -1)))];
       if (next) select(next.path, true);
     } else if (e.key === 'Delete' && state.selected) {
       removeFile(state.selected);
     }
   });
+  window.addEventListener('keyup', (e) => {
+    if (e.code === 'Space' && state.cmpKey) { e.preventDefault(); setCompare('cmpKey', false); }
+  });
 
   new ResizeObserver(layoutImages).observe($('orig-canvas'));
-  $('orig-img').onload = layoutImages;
+  initPreviewInteraction();
 }
 
 // ---------- 시작 ----------

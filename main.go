@@ -215,6 +215,7 @@ func printHelp() {
 	fmt.Println("공통 동작:")
 	fmt.Println("  - 경로를 생략하면 현재 폴더의 PNG를 처리합니다. 파일과 폴더를 여러 개 줄 수 있습니다.")
 	fmt.Println("  - 기본적으로 원본은 그대로 두고 접미사(-s)가 붙은 새 파일로 저장합니다. 덮어쓰려면 -w.")
+	fmt.Println("  - -w 와 -backup 을 함께 쓰면 덮어쓰기 전에 원본을 <파일 폴더>/" + common.BackupDirName + "/<실행 시각>/ 에 복사해 둡니다.")
 	fmt.Println("  - -o <폴더> 로 다른 폴더에 저장할 수 있습니다 (하위 폴더 구조 유지, -w 와는 함께 쓸 수 없음).")
 	fmt.Println("  - -n 으로 실제 처리 없이 대상 파일만 미리 볼 수 있습니다.")
 	fmt.Println("  - 명령은 별칭이나 겹치지 않는 앞부분으로 줄여 쓸 수 있습니다 (예: rd, red, d).")
@@ -247,6 +248,7 @@ type batchFlags struct {
 	threads   *int
 	dryRun    *bool
 	outDir    *string
+	backup    *bool
 }
 
 // outputMode: 명령이 결과 파일을 만드는 방식입니다.
@@ -270,6 +272,7 @@ func addBatchFlags(fs *flag.FlagSet, defaultSuffix string, mode outputMode) *bat
 		b.outDir = fs.String("o", "", "결과를 저장할 폴더 (하위 폴더 구조 유지, 없으면 만듦)")
 		if mode == modeOutput {
 			b.inPlace = fs.Bool("w", false, "새 파일 대신 원본을 덮어쓰기")
+			b.backup = fs.Bool("backup", false, "-w 로 덮어쓰기 전에 원본을 <파일 폴더>/"+common.BackupDirName+"/<실행 시각>/ 에 복사 (-w 와 함께 쓰기를 권장)")
 		}
 	}
 	return b
@@ -288,6 +291,7 @@ func (b *batchFlags) options(roots []string) common.Options {
 		o.OutDir = *b.outDir
 		if b.inPlace != nil {
 			o.InPlace = *b.inPlace
+			o.Backup = *b.backup
 		}
 	}
 	// 캐시된 팔레트 이미지가 작업 대상에 섞이지 않도록 제외합니다.
@@ -340,6 +344,9 @@ func execute(b *batchFlags, roots []string, task common.Task) int {
 
 	if *b.dryRun {
 		fmt.Printf("[미리보기] %d개 파일이 처리됩니다. 실제로는 아무것도 쓰지 않습니다.\n", len(files))
+		if o.Backup {
+			fmt.Printf("  (덮어쓰기 전에 원본을 %s 에 백업합니다)\n", common.BackupDirName)
+		}
 		failed := 0
 		for i, plan := range o.PlanOutputs(files) {
 			f, out := files[i].Path, plan.Output
@@ -390,6 +397,16 @@ func execute(b *batchFlags, roots []string, task common.Task) int {
 	})
 
 	fmt.Printf("\n완료 %d · 건너뜀 %d · 실패 %d  (%.1fs)\n", sum.Done, sum.Skipped, sum.Failed, sum.Elapsed.Seconds())
+	if sum.Backups > 0 {
+		fmt.Printf("원본 %d개를 백업했습니다:\n", sum.Backups)
+		for i, d := range sum.BackupDirs {
+			if i == 5 {
+				fmt.Printf("  … 외 %d곳\n", len(sum.BackupDirs)-i)
+				break
+			}
+			fmt.Printf("  %s\n", d)
+		}
+	}
 	if sum.Failed > 0 {
 		return exitFailed
 	}

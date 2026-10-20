@@ -42,7 +42,14 @@ type Options struct {
 	NoOutput    bool     // 작업이 출력 경로를 직접 결정함 (slice 등)
 	Threads     int
 	ExcludeDirs []string // 탐색에서 제외할 디렉터리
+	Backup      bool     // InPlace 일 때, 덮어쓰기 전에 원본을 <파일 폴더>/BackupDirName/<실행 시각>/ 에 복사
 }
+
+// BackupDirName: 덮어쓰기 전 원본을 보관하는 숨김 폴더 이름입니다. 점으로 시작하므로 폴더 탐색에서 건너뜁니다.
+const BackupDirName = ".sprite-tools-backup"
+
+// backupStampLayout: 한 번 실행에 하나씩 붙는 백업 하위 폴더 이름의 형식입니다.
+const backupStampLayout = "20060102-150405"
 
 // Input: 수집된 입력 파일 하나와, 그 파일을 찾은 루트 폴더입니다.
 // 파일을 직접 지정했다면 Root 는 비어 있습니다.
@@ -68,14 +75,17 @@ type Result struct {
 	Output    string `json:"output"`
 	Status    Status `json:"status"`
 	Message   string `json:"message"`
+	Backup    string `json:"backup,omitempty"` // 덮어쓰기 전에 복사해 둔 원본 경로 (백업했을 때만)
 }
 
 type Summary struct {
-	Done     int           `json:"done"`
-	Skipped  int           `json:"skipped"`
-	Failed   int           `json:"failed"`
-	Canceled bool          `json:"canceled"`
-	Elapsed  time.Duration `json:"elapsed"`
+	Done       int           `json:"done"`
+	Skipped    int           `json:"skipped"`
+	Failed     int           `json:"failed"`
+	Canceled   bool          `json:"canceled"`
+	Elapsed    time.Duration `json:"elapsed"`
+	Backups    int           `json:"backups"`    // 실제로 남은 백업 파일 수
+	BackupDirs []string      `json:"backupDirs"` // 백업이 저장된 폴더들 (정렬됨)
 }
 
 // OutputPath: 옵션에 따른 출력 경로를 계산합니다. 루트를 모르는(직접 지정한) 파일로 취급합니다.
@@ -115,6 +125,9 @@ func (o Options) OutputFor(in Input) string {
 func (o Options) Validate() error {
 	if o.InPlace && o.OutDir != "" {
 		return errors.New("덮어쓰기(-w)와 출력 폴더(-o)는 함께 쓸 수 없습니다")
+	}
+	if o.Backup && !o.InPlace {
+		return errors.New("원본 백업(-backup)은 덮어쓰기(-w)와 함께 쓸 때만 의미가 있습니다")
 	}
 	if !o.InPlace && !o.NoOutput && o.Suffix == "" && o.OutDir == "" {
 		return errors.New("출력 접미사가 비어 있습니다. 원본을 덮어쓰려면 덮어쓰기(-w)를, 다른 폴더에 저장하려면 출력 폴더(-o)를 사용하세요")
@@ -293,6 +306,7 @@ func RunInputs(ctx context.Context, files []Input, o Options, task Task, report 
 	var sum Summary
 	plans := o.PlanOutputs(files)
 	start := time.Now()
+	stamp := start.Format(backupStampLayout) // 한 번 실행의 백업은 모두 같은 시각 폴더에 둡니다.
 
 	threads := o.Threads
 	if threads <= 0 {
@@ -315,11 +329,20 @@ func RunInputs(ctx context.Context, files []Input, o Options, task Task, report 
 				if err == nil && o.OutDir != "" && out != "" {
 					err = os.MkdirAll(filepath.Dir(out), 0o755)
 				}
+				// 원본을 먼저 복사해 두고, 작업이 실제로 끝나지 않았다면(건너뜀·실패) 복사본을 지웁니다.
+				var backup string
+				if err == nil && o.Backup && o.InPlace && out != "" {
+					backup, err = backupFile(in, stamp)
+				}
 				if err == nil {
 					msg, err = runTask(task, in, out)
 				}
+				if err != nil && backup != "" {
+					os.Remove(backup)
+					backup = ""
+				}
 
-				r := Result{Index: i, Total: len(files), Input: in, Output: out, Message: msg}
+				r := Result{Index: i, Total: len(files), Input: in, Output: out, Message: msg, Backup: backup}
 				switch {
 				case err == nil:
 					r.Status = StatusDone
@@ -339,6 +362,9 @@ func RunInputs(ctx context.Context, files []Input, o Options, task Task, report 
 					sum.Skipped++
 				default:
 					sum.Failed++
+				}
+				if r.Backup != "" {
+					sum.Backups++
 				}
 				r.Completed = sum.Done + sum.Skipped + sum.Failed
 				if report != nil {
@@ -361,8 +387,78 @@ feed:
 	close(jobs)
 	wg.Wait()
 
+	if o.Backup && o.InPlace {
+		sum.BackupDirs = finishBackupDirs(files, stamp)
+	}
 	sum.Elapsed = time.Since(start)
 	return sum
+}
+
+// backupFile: 원본을 <폴더>/BackupDirName/<stamp>/<이름> 으로 복사하고 그 경로를 반환합니다.
+// 원본이 없으면 복사할 것이 없으므로 빈 경로를 돌려주고, 이후 작업이 스스로 실패하도록 둡니다.
+func backupFile(in, stamp string) (string, error) {
+	data, err := os.ReadFile(in)
+	if errors.Is(err, fs.ErrNotExist) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("원본 백업 실패: %v", err)
+	}
+	dir := filepath.Join(filepath.Dir(in), BackupDirName, stamp)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", fmt.Errorf("원본 백업 실패: %v", err)
+	}
+	dst := filepath.Join(dir, filepath.Base(in))
+	if err := WriteFileAtomic(dst, data); err != nil {
+		return "", fmt.Errorf("원본 백업 실패: %v", err)
+	}
+	return dst, nil
+}
+
+// finishBackupDirs: 실행이 끝난 뒤 비어 있는 백업 폴더를 정리하고, 백업이 남은 폴더 목록을 반환합니다.
+// 실행 중에 지우면 다른 스레드가 쓰려는 폴더를 없앨 수 있으므로 모두 끝난 뒤에 합니다.
+func finishBackupDirs(files []Input, stamp string) []string {
+	seen := make(map[string]bool)
+	var kept []string
+	for _, f := range files {
+		root := filepath.Join(filepath.Dir(f.Path), BackupDirName)
+		dir := filepath.Join(root, stamp)
+		if seen[dir] {
+			continue
+		}
+		seen[dir] = true
+		if err := os.Remove(dir); err != nil { // 비어 있을 때만 지워짐
+			if _, statErr := os.Stat(dir); statErr == nil {
+				kept = append(kept, dir)
+			}
+			continue
+		}
+		os.Remove(root) // 다른 백업이 없을 때만 지워짐
+	}
+	slices.Sort(kept)
+	return kept
+}
+
+// RestoreBackup: 백업해 둔 원본을 원래 위치(dest)로 되돌립니다. 백업 파일은 그대로 남깁니다.
+// BackupDirName 폴더 안의 파일만 복원 대상으로 인정합니다.
+func RestoreBackup(backup, dest string) error {
+	// 백업은 <폴더>/.sprite-tools-backup/<시각>/<이름> 에 있으므로, <폴더>/<이름> 으로만 복원을 허용합니다.
+	backup, dest = filepath.Clean(backup), filepath.Clean(dest)
+	runDir := filepath.Dir(backup)
+	backupRoot := filepath.Dir(runDir)
+	if filepath.Base(backupRoot) != BackupDirName ||
+		!strings.EqualFold(filepath.Dir(backupRoot), filepath.Dir(dest)) ||
+		!strings.EqualFold(filepath.Base(backup), filepath.Base(dest)) {
+		return fmt.Errorf("백업 파일과 복원 위치가 맞지 않습니다: %s -> %s", backup, dest)
+	}
+	data, err := os.ReadFile(backup)
+	if err != nil {
+		return fmt.Errorf("백업 파일을 읽을 수 없습니다: %v", err)
+	}
+	if err := WriteFileAtomic(dest, data); err != nil {
+		return fmt.Errorf("복원 실패: %v", err)
+	}
+	return nil
 }
 
 // runTask: 작업 중 panic 이 발생해도 전체 실행이 중단되지 않도록 보호합니다.

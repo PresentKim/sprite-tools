@@ -13,6 +13,7 @@
         <span>Sprite Tools</span>
       </div>
       <nav class="tabs" id="tabs" role="tablist"></nav>
+      <button class="icon-btn" id="help-btn" title="단축키 도움말 (F1 또는 ?)" aria-label="단축키 도움말">?</button>
     </header>
 
     <main class="layout">
@@ -120,7 +121,10 @@
                 <p class="muted small">폴더에서 찾은 파일은 하위 폴더 구조를 유지합니다.</p>
               </div>
               <label class="radio" id="inplace-radio"><input type="radio" name="out-mode" value="inplace" /> 원본 덮어쓰기</label>
-              <p class="warn small indent" id="inplace-warn">원본 파일이 바뀝니다. 되돌릴 수 없습니다.</p>
+              <div class="indent" id="inplace-box">
+                <label class="check small" title="덮어쓰는 파일마다 원본을 같은 폴더의 .sprite-tools-backup 폴더에 복사해 둡니다"><input type="checkbox" id="backup" /> 덮어쓰기 전에 원본 백업</label>
+                <p class="warn small" id="inplace-warn"></p>
+              </div>
               <div id="suffix-box">
                 <label class="field-label" for="suffix">출력 접미사</label>
                 <input type="text" id="suffix" spellcheck="false" />
@@ -147,6 +151,7 @@
         </div>
 
         <div class="run-area">
+          <label class="check small" id="only-shown-box" hidden title="끄면 필터와 상관없이 목록의 모든 파일을 처리합니다"><input type="checkbox" id="only-shown" /> <span id="only-shown-label"></span></label>
           <button class="btn primary run" id="run-btn"></button>
           <p class="muted small center" id="run-hint">Ctrl+Enter</p>
         </div>
@@ -154,13 +159,17 @@
 
       <!-- 파일 목록 -->
       <section class="panel files">
-        <div class="toolbar">
-          <button class="btn" id="add-files">＋ 파일</button>
-          <button class="btn" id="add-folder">＋ 폴더</button>
-          <label class="check small" title="폴더를 추가할 때 하위 폴더까지 포함"><input type="checkbox" id="recursive" /> 하위 폴더 포함</label>
-          <span class="spacer"></span>
-          <span class="muted small" id="file-count"></span>
-          <button class="btn ghost small" id="clear-files">비우기</button>
+        <div class="toolbar files-toolbar">
+          <div class="toolbar-row">
+            <button class="btn" id="add-files">＋ 파일</button>
+            <button class="btn" id="add-folder">＋ 폴더</button>
+            <span class="muted small ellipsis count" id="file-count"></span>
+            <button class="btn ghost small" id="clear-files">비우기</button>
+          </div>
+          <div class="toolbar-row">
+            <input type="text" id="file-filter" class="filter" placeholder="파일 이름 필터 (Ctrl+F)" spellcheck="false" autocomplete="off" />
+            <label class="check small" title="폴더를 추가할 때 하위 폴더까지 포함"><input type="checkbox" id="recursive" /> 하위 폴더 포함</label>
+          </div>
         </div>
         <div class="file-list" id="file-list" tabindex="0"></div>
         <div class="empty" id="empty">
@@ -180,13 +189,14 @@
         </div>
         <div class="compare">
           <figure class="pane">
-            <figcaption><span>원본</span><span class="muted" id="orig-meta"></span></figcaption>
+            <figcaption><span>원본</span><span class="cap-right muted"><span class="probe" id="orig-probe" hidden></span><span class="meta" id="orig-meta"></span></span></figcaption>
             <div class="canvas" id="orig-canvas"><img id="orig-img" alt="" draggable="false" /></div>
           </figure>
-          <figure class="pane">
-            <figcaption><span>결과</span><span class="muted" id="result-meta"></span></figcaption>
-            <div class="canvas" id="result-canvas">
+          <figure class="pane" id="result-pane">
+            <figcaption><span id="result-title">결과</span><span class="cap-right muted"><span class="probe" id="result-probe" hidden></span><span class="meta" id="result-meta"></span></span></figcaption>
+            <div class="canvas" id="result-canvas" title="누르고 있으면 원본 (Space)">
               <img id="result-img" alt="" draggable="false" />
+              <img id="compare-img" alt="" draggable="false" hidden />
               <div class="canvas-msg" id="result-msg"></div>
               <div class="spinner" id="spinner"></div>
             </div>
@@ -205,6 +215,27 @@
 
     <div class="drop-overlay" id="drop-overlay"><div>놓아서 추가</div></div>
     <div class="toast" id="toast"></div>
+
+    <div class="overlay" id="help" hidden>
+      <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="help-title">
+        <div class="dialog-head">
+          <h2 id="help-title">단축키</h2>
+          <button class="icon-btn" id="help-close" aria-label="닫기">×</button>
+        </div>
+        <dl class="keys">
+          <dt><kbd>Ctrl</kbd>+<kbd>Enter</kbd></dt><dd>실행</dd>
+          <dt><kbd>Esc</kbd></dt><dd>작업 취소 / 닫기 / 필터 지우기</dd>
+          <dt><kbd>Alt</kbd>+<kbd>1</kbd>~<kbd>9</kbd></dt><dd>명령 전환</dd>
+          <dt><kbd>↑</kbd> <kbd>↓</kbd></dt><dd>파일 이동</dd>
+          <dt><kbd>Delete</kbd></dt><dd>목록에서 제거</dd>
+          <dt><kbd>Ctrl</kbd>+<kbd>F</kbd></dt><dd>파일 이름 필터</dd>
+          <dt><kbd>Space</kbd></dt><dd>누르고 있는 동안 원본 보기 (결과 창을 마우스로 눌러도 됨)</dd>
+          <dt><kbd>Ctrl</kbd>+휠</dt><dd>미리보기 확대/축소</dd>
+          <dt><kbd>F1</kbd> <kbd>?</kbd></dt><dd>이 도움말</dd>
+        </dl>
+        <p class="muted small">미리보기에 마우스를 올리면 픽셀 좌표와 색상이 캡션에 표시됩니다.</p>
+      </div>
+    </div>
   </div>
   <script type="module" src="./src/main.js"></script>
 </body>

@@ -107,7 +107,7 @@ p { margin: 0; }
 #reduce-threshold[hidden], #reduce-count[hidden] { display: none; }
 #reduce-mode, #pack-align { align-self: flex-start; }
 #output-file:not([hidden]), #output-dir:not([hidden]) { display: flex; flex-direction: column; gap: 8px; }
-#export-dir-box[hidden], #suffix-box[hidden], #inplace-radio[hidden], #inplace-warn[hidden] { display: none; }
+#export-dir-box[hidden], #suffix-box[hidden], #inplace-radio[hidden], #inplace-box[hidden], #only-shown-box[hidden] { display: none; }
 #suffix-box { display: flex; flex-direction: column; gap: 6px; }
 details.group summary { cursor: pointer; color: var(--muted); font-weight: 600; font-size: 12px; }
 details.group[open] summary { margin-bottom: 4px; }
@@ -164,6 +164,22 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); margi
   display: flex; align-items: center; gap: 8px; padding: 8px 12px; min-height: 46px;
   border-bottom: 1px solid var(--line);
 }
+.toolbar > * { flex: none; }
+.toolbar > .ellipsis { flex: 0 1 auto; }
+.toolbar > .spacer { flex: 1 1 0; min-width: 0; }
+/* 파일 목록 툴바는 두 줄: 추가/비우기, 필터/하위 폴더 */
+.files-toolbar { flex-direction: column; align-items: stretch; gap: 6px; }
+.toolbar-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.toolbar-row > * { flex: none; }
+.toolbar-row > .count { flex: 1 1 0; min-width: 0; text-align: right; }
+.toolbar-row > .filter { flex: 1 1 0; min-width: 0; width: auto; padding: 4px 8px; }
+.files-toolbar .btn:not(.small) { padding: 5px 10px; }
+.icon-btn {
+  flex: none; width: 24px; height: 24px; padding: 0; border-radius: 50%; border: 1px solid var(--line);
+  background: none; color: var(--muted); font: inherit; font-weight: 700; line-height: 1; cursor: pointer;
+}
+.icon-btn:hover { color: var(--text); border-color: var(--accent); }
+.no-match { padding: 24px 16px; text-align: center; color: var(--muted); }
 
 /* 파일 목록 */
 .file-list { flex: 1; overflow: auto; padding: 4px 0; outline: none; }
@@ -215,6 +231,17 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); margi
 .compare { flex: 1; min-height: 0; display: grid; grid-template-rows: 1fr 1fr; gap: 1px; background: var(--line); }
 .pane { margin: 0; display: flex; flex-direction: column; min-height: 0; background: var(--panel); }
 .pane figcaption { display: flex; justify-content: space-between; gap: 8px; padding: 6px 12px; font-size: 12px; font-weight: 600; }
+.pane figcaption > span:first-child { white-space: nowrap; }
+.pane.comparing figcaption > span:first-child { color: var(--accent); }
+.cap-right { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 400; }
+.cap-right > span[hidden] { display: none; }
+.probe { font-variant-numeric: tabular-nums; color: var(--text); }
+.probe-sw {
+  display: inline-block; width: 10px; height: 10px; margin-right: 6px; vertical-align: -1px; border-radius: 2px;
+  background: linear-gradient(var(--c), var(--c)), repeating-conic-gradient(var(--check-a) 0 25%, var(--check-b) 0 50%) 0 0 / 6px 6px;
+  box-shadow: inset 0 0 0 1px rgba(128,128,128,.4);
+}
+#result-canvas { cursor: crosshair; }
 .canvas {
   position: relative; flex: 1; min-height: 0; overflow: auto; display: grid; place-items: center;
   background: repeating-conic-gradient(var(--check-a) 0 25%, var(--check-b) 0 50%) 0 0 / 16px 16px;
@@ -242,7 +269,9 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); margi
 .result-colors .label { font-size: 12px; color: var(--muted); margin-right: 6px; }
 
 .seg { display: flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
-.seg button { border: 0; background: none; color: var(--muted); font: inherit; font-size: 12px; padding: 3px 8px; cursor: pointer; }
+.seg { flex: none; }
+.seg button { border: 0; background: none; color: var(--muted); font: inherit; font-size: 12px; padding: 3px 8px; cursor: pointer; white-space: nowrap; }
+#zoom-seg button { padding: 3px 7px; }
 .seg button + button { border-left: 1px solid var(--line); }
 .seg button.on { background: var(--panel-2); color: var(--text); font-weight: 600; }
 
@@ -270,7 +299,29 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); margi
 }
 .toast.on { opacity: 1; transform: translate(-50%, 0); pointer-events: auto; }
 .toast.failed { border-color: var(--fail); }
-.toast button { margin-left: 10px; }
+.toast { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; justify-content: center; }
+.toast button { margin-left: 4px; }
+
+/* 단축키 도움말 */
+.overlay {
+  position: fixed; inset: 0; z-index: 30; display: grid; place-items: center;
+  background: rgba(0,0,0,.45);
+}
+.overlay[hidden] { display: none; }
+.dialog {
+  width: min(440px, calc(100vw - 48px)); padding: 16px 20px 18px; border-radius: 10px;
+  background: var(--panel); border: 1px solid var(--line); box-shadow: 0 12px 40px rgba(0,0,0,.4);
+  display: flex; flex-direction: column; gap: 12px;
+}
+.dialog-head { display: flex; align-items: center; justify-content: space-between; }
+.dialog-head h2 { margin: 0; }
+.keys { display: grid; grid-template-columns: max-content 1fr; gap: 8px 16px; margin: 0; align-items: center; }
+.keys dt { white-space: nowrap; color: var(--muted); }
+.keys dd { margin: 0; }
+kbd {
+  font: 11px/1 "Segoe UI", "Malgun Gothic", system-ui, sans-serif; padding: 3px 6px; border-radius: 4px;
+  background: var(--panel-2); border: 1px solid var(--line); border-bottom-width: 2px; color: var(--text);
+}
 
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-thumb { background: var(--line); border-radius: 5px; border: 2px solid var(--panel); }

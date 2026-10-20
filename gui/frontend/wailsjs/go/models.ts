@@ -1,5 +1,19 @@
 export namespace main {
 	
+	export class BackupPair {
+	    path: string;
+	    backup: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new BackupPair(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.path = source["path"];
+	        this.backup = source["backup"];
+	    }
+	}
 	export class FileEntry {
 	    path: string;
 	    name: string;
@@ -51,6 +65,7 @@ export namespace main {
 	    palette: string;
 	    suffix: string;
 	    inPlace: boolean;
+	    backup: boolean;
 	    threads: number;
 	    pad: number;
 	    saveName: string;
@@ -75,6 +90,7 @@ export namespace main {
 	        this.palette = source["palette"];
 	        this.suffix = source["suffix"];
 	        this.inPlace = source["inPlace"];
+	        this.backup = source["backup"];
 	        this.threads = source["threads"];
 	        this.pad = source["pad"];
 	        this.saveName = source["saveName"];
@@ -138,6 +154,20 @@ export namespace main {
 	        this.height = source["height"];
 	        this.colors = source["colors"];
 	        this.millis = source["millis"];
+	    }
+	}
+	export class RestoreReport {
+	    restored: number;
+	    errors: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new RestoreReport(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.restored = source["restored"];
+	        this.errors = source["errors"];
 	    }
 	}
 

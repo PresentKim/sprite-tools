@@ -74,6 +74,7 @@ type JobRequest struct {
 	Palette   string  `json:"palette"`
 	Suffix    string  `json:"suffix"`
 	InPlace   bool    `json:"inPlace"`
+	Backup    bool    `json:"backup"` // InPlace 일 때 덮어쓰기 전에 원본을 백업 폴더에 복사
 	Threads   int     `json:"threads"`
 	Pad       int     `json:"pad"`      // trim: 사방에 더할 투명 여백
 	SaveName  string  `json:"saveName"` // extract: 비어 있지 않으면 공용 팔레트 폴더에도 이 이름으로 저장
@@ -353,7 +354,9 @@ func (a *App) imageFunc(req JobRequest) (func(image.Image) (image.Image, string,
 	return nil, fmt.Errorf("알 수 없는 명령: %s", req.Command)
 }
 
-func (a *App) buildTask(req JobRequest) (common.Task, common.Options, error) {
+// buildTask: 요청을 실행할 작업과 옵션으로 바꿉니다. produced 는 작업이 출력 경로를 직접 정하는 경우(slice)
+// 저장한 파일을 알려 주는 콜백이며 nil 이어도 됩니다 (여러 스레드에서 호출될 수 있음).
+func (a *App) buildTask(req JobRequest, produced func(paths []string)) (common.Task, common.Options, error) {
 	o := common.Options{Threads: req.Threads}
 	if req.Command == "slice" {
 		w, h, err := parseFrameSize(req.FrameSize)
@@ -362,7 +365,11 @@ func (a *App) buildTask(req JobRequest) (common.Task, common.Options, error) {
 		}
 		o.NoOutput = true
 		return func(in, _ string) (string, error) {
-			return processor.SliceFile(in, w, h, req.OutDir, req.KeepEmpty)
+			msg, paths, err := processor.SliceFilePaths(in, w, h, req.OutDir, req.KeepEmpty)
+			if produced != nil && len(paths) > 0 {
+				produced(paths)
+			}
+			return msg, err
 		}, o, nil
 	}
 
@@ -374,6 +381,7 @@ func (a *App) buildTask(req JobRequest) (common.Task, common.Options, error) {
 	if req.Command == "extract" {
 		o.InPlace = false // 팔레트 이미지로 원본을 덮어쓰면 안 됩니다.
 	}
+	o.Backup = req.Backup && o.InPlace
 	if err := o.Validate(); err != nil {
 		return nil, o, err
 	}
@@ -416,7 +424,13 @@ func (a *App) Run(req JobRequest, files []InputFile) error {
 	if req.Command == "extract" && strings.TrimSpace(req.SaveName) != "" && len(files) > 1 {
 		return fmt.Errorf("팔레트 목록에 저장은 파일이 하나일 때만 쓸 수 있습니다 (대상 %d개)", len(files))
 	}
-	task, o, err := a.buildTask(req)
+	var outMu sync.Mutex
+	var outputs []string // 이번 실행으로 새로 만들어진 파일 (덮어쓴 원본은 제외)
+	task, o, err := a.buildTask(req, func(paths []string) {
+		outMu.Lock()
+		outputs = append(outputs, paths...)
+		outMu.Unlock()
+	})
 	if err != nil {
 		return err
 	}
@@ -442,14 +456,63 @@ func (a *App) Run(req JobRequest, files []InputFile) error {
 			cancel()
 		}()
 		sum := common.RunInputs(ctx, inputs, o, task, func(r common.Result) {
+			if r.Status == common.StatusDone && r.Output != "" && !common.SamePath(r.Input, r.Output) {
+				outMu.Lock()
+				outputs = append(outputs, r.Output)
+				outMu.Unlock()
+			}
 			runtime.EventsEmit(a.ctx, "job:result", r)
 		})
+		outMu.Lock()
+		produced := append([]string{}, outputs...)
+		outMu.Unlock()
+		sort.Strings(produced)
+		backupDirs := sum.BackupDirs
+		if backupDirs == nil {
+			backupDirs = []string{}
+		}
 		runtime.EventsEmit(a.ctx, "job:done", map[string]any{
 			"done": sum.Done, "skipped": sum.Skipped, "failed": sum.Failed,
 			"canceled": sum.Canceled, "seconds": sum.Elapsed.Seconds(),
+			"outputs": produced, "backups": sum.Backups, "backupDirs": backupDirs,
 		})
 	}()
 	return nil
+}
+
+// BackupPair: 덮어쓴 원본 파일과, 덮어쓰기 전에 복사해 둔 백업 파일입니다.
+type BackupPair struct {
+	Path   string `json:"path"`
+	Backup string `json:"backup"`
+}
+
+// RestoreReport: 백업 복원 결과입니다. Restored 는 되돌린 파일 수, Errors 는 실패한 파일별 사유입니다.
+type RestoreReport struct {
+	Restored int      `json:"restored"`
+	Errors   []string `json:"errors"`
+}
+
+// RestoreBackups: 백업해 둔 원본을 원래 위치로 되돌립니다. 작업이 진행 중일 때는 거부합니다.
+func (a *App) RestoreBackups(pairs []BackupPair) (RestoreReport, error) {
+	a.mu.Lock()
+	busy := a.cancelJob != nil
+	a.mu.Unlock()
+	if busy {
+		return RestoreReport{}, errors.New("작업이 진행 중입니다. 끝난 뒤에 되돌리세요")
+	}
+	rep := RestoreReport{Errors: []string{}}
+	for _, p := range pairs {
+		if !strings.EqualFold(filepath.Ext(p.Path), ".png") {
+			rep.Errors = append(rep.Errors, fmt.Sprintf("%s: PNG 파일이 아닙니다", p.Path))
+			continue
+		}
+		if err := common.RestoreBackup(p.Backup, p.Path); err != nil {
+			rep.Errors = append(rep.Errors, fmt.Sprintf("%s: %v", filepath.Base(p.Path), err))
+			continue
+		}
+		rep.Restored++
+	}
+	return rep, nil
 }
 
 // Cancel: 진행 중인 작업을 멈춥니다. 이미 처리 중인 파일은 끝까지 처리됩니다.
