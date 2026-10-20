@@ -1,10 +1,10 @@
 package processor
 
 import (
-	"fmt"
 	"image"
 
 	"sprite-tools/pkg/common"
+	"sprite-tools/pkg/i18n"
 )
 
 const (
@@ -25,16 +25,16 @@ func Upscale(inputPath, outputPath string, scale int) (string, error) {
 // UpscaleImage: 최근접 이웃 방식으로 정수 배율(2~32)만큼 확대합니다.
 func UpscaleImage(src image.Image, scale int) (image.Image, string, error) {
 	if scale < MinUpscale || scale > MaxUpscale {
-		return nil, "", fmt.Errorf("확대 배율은 %d~%d 사이여야 합니다: %d", MinUpscale, MaxUpscale, scale)
+		return nil, "", i18n.Errorf("err.upscale.scale_range", MinUpscale, MaxUpscale, scale)
 	}
 	n := common.ToNRGBA(src)
 	w, h := n.Rect.Dx(), n.Rect.Dy()
 	if w == 0 || h == 0 {
-		return nil, "", common.Skip("빈 이미지")
+		return nil, "", common.Skip("skip.upscale.empty")
 	}
 	newW, newH := w*scale, h*scale
 	if newW*newH > maxOutputPixels {
-		return nil, "", fmt.Errorf("결과가 너무 큽니다: %dx%d", newW, newH)
+		return nil, "", i18n.Errorf("err.result_too_large", newW, newH)
 	}
 
 	dst := image.NewNRGBA(image.Rect(0, 0, newW, newH))
@@ -53,5 +53,5 @@ func UpscaleImage(src image.Image, scale int) (image.Image, string, error) {
 			copy(dst.Pix[(y*scale+k)*rowLen:(y*scale+k+1)*rowLen], first)
 		}
 	}
-	return dst, fmt.Sprintf("%d배 확대, %dx%d → %dx%d", scale, w, h, newW, newH), nil
+	return dst, i18n.T("msg.upscale.result", scale, w, h, newW, newH), nil
 }

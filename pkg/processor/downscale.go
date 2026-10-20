@@ -1,10 +1,10 @@
 package processor
 
 import (
-	"fmt"
 	"image"
 
 	"sprite-tools/pkg/common"
+	"sprite-tools/pkg/i18n"
 )
 
 func gcd(a, b int) int {
@@ -91,10 +91,10 @@ func DownscaleImage(src image.Image, forceScale int) (image.Image, string, error
 	if scale <= 0 {
 		scale = detectScaleNRGBA(n)
 		if scale <= 1 {
-			return nil, "", common.Skip("이미 1:1 크기이거나 배율을 감지할 수 없음, %dx%d", bounds.Dx(), bounds.Dy())
+			return nil, "", common.Skip("skip.downscale.none", bounds.Dx(), bounds.Dy())
 		}
 	} else if bounds.Dx()%scale != 0 || bounds.Dy()%scale != 0 {
-		return nil, "", fmt.Errorf("이미지 크기 %dx%d 가 배율 %d 로 나누어떨어지지 않습니다", bounds.Dx(), bounds.Dy(), scale)
+		return nil, "", i18n.Errorf("err.downscale.not_divisible", bounds.Dx(), bounds.Dy(), scale)
 	}
 
 	newW, newH := bounds.Dx()/scale, bounds.Dy()/scale
@@ -105,5 +105,5 @@ func DownscaleImage(src image.Image, forceScale int) (image.Image, string, error
 		}
 	}
 
-	return dst, fmt.Sprintf("%d배 축소, %dx%d → %dx%d", scale, bounds.Dx(), bounds.Dy(), newW, newH), nil
+	return dst, i18n.T("msg.downscale.result", scale, bounds.Dx(), bounds.Dy(), newW, newH), nil
 }

@@ -5,12 +5,16 @@ import (
 	"image"
 	"image/color"
 	"image/png"
+	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
+	"strings"
 	"testing"
 
 	"sprite-tools/pkg/common"
+	"sprite-tools/pkg/i18n"
 )
 
 func TestResolveCommand(t *testing.T) {
@@ -128,4 +132,122 @@ func TestDespeckleCommand(t *testing.T) {
 	if n.NRGBAAt(0, 0).A != 0 || n.NRGBAAt(3, 3).A != 255 {
 		t.Error("외톨이만 지워져야 합니다")
 	}
+}
+
+func TestExtractLang(t *testing.T) {
+	cases := []struct {
+		in    []string
+		rest  []string
+		lang  string
+		given bool
+	}{
+		{[]string{"reduce", "a.png"}, []string{"reduce", "a.png"}, "", false},
+		{[]string{"--lang", "ko", "reduce"}, []string{"reduce"}, "ko", true},
+		{[]string{"reduce", "-lang", "ko", "a.png"}, []string{"reduce", "a.png"}, "ko", true},
+		{[]string{"reduce", "--lang=ko_KR.UTF-8"}, []string{"reduce"}, "ko_KR.UTF-8", true},
+		{[]string{"--lang", "en", "x", "--lang", "ko"}, []string{"x"}, "ko", true},
+		{[]string{"x", "--", "--lang", "ko"}, []string{"x", "--", "--lang", "ko"}, "", false},
+	}
+	for _, c := range cases {
+		rest, lang, given, err := extractLang(c.in)
+		if err != nil || !slices.Equal(rest, c.rest) || lang != c.lang || given != c.given {
+			t.Errorf("%v: got %v %q %v %v", c.in, rest, lang, given, err)
+		}
+	}
+	if _, _, _, err := extractLang([]string{"reduce", "--lang"}); err == nil {
+		t.Error("--lang without a value should fail")
+	}
+}
+
+func TestLanguagePrecedence(t *testing.T) {
+	t.Cleanup(func() { _ = i18n.SetLanguage("en") })
+	check := func(want string, env string, args ...string) {
+		t.Helper()
+		t.Setenv(langEnv, env)
+		if _, err := setupLanguage(args); err != nil {
+			t.Fatalf("%v: %v", args, err)
+		}
+		if got := i18n.Language(); got != want {
+			t.Errorf("env=%q args=%v: language %q, want %q", env, args, got, want)
+		}
+	}
+	check("en", "")                        // 기본값은 영어 (OS 로캘을 보지 않음)
+	check("ko", "ko")                      // 환경 변수
+	check("ko", "ko_KR.UTF-8")             // 로캘 형식도 허용
+	check("en", "ko", "--lang", "en", "x") // 플래그가 환경 변수보다 우선
+	check("ko", "en", "x", "-lang=ko")     // 명령 뒤에 있어도 됨
+	check("en", "klingon")                 // 잘못된 환경 변수는 경고 후 기본값
+	if _, err := setupLanguage([]string{"--lang", "klingon"}); err == nil {
+		t.Error("unknown --lang should fail")
+	}
+	if code := run([]string{"--lang", "klingon", "help"}); code != exitUsage {
+		t.Errorf("unknown --lang: exit %d", code)
+	}
+}
+
+func TestCommandsHaveText(t *testing.T) {
+	for _, l := range i18n.Languages() {
+		if err := i18n.SetLanguage(l.Code); err != nil {
+			t.Fatal(err)
+		}
+		for i := range commands {
+			c := &commands[i]
+			for _, s := range []string{c.summary(), c.usage(), c.details()} {
+				if s == "" || strings.HasPrefix(s, "cmd.") {
+					t.Errorf("%s/%s: missing command text %q", l.Code, c.name, s)
+				}
+			}
+		}
+	}
+	_ = i18n.SetLanguage("en")
+}
+
+var hangul = regexp.MustCompile(`[\x{AC00}-\x{D7A3}]`)
+
+// captureOutput runs fn while redirecting os.Stdout and os.Stderr, and returns what was written.
+func captureOutput(t *testing.T, fn func()) string {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldOut, oldErr := os.Stdout, os.Stderr
+	os.Stdout, os.Stderr = w, w
+	done := make(chan string)
+	go func() {
+		data, _ := io.ReadAll(r)
+		done <- string(data)
+	}()
+	fn()
+	os.Stdout, os.Stderr = oldOut, oldErr
+	w.Close()
+	return <-done
+}
+
+func TestDefaultOutputIsEnglish(t *testing.T) {
+	t.Setenv(langEnv, "")
+	dir := t.TempDir()
+	p := filepath.Join(dir, "a.png")
+	writeTestPNG(t, p)
+	cmds := [][]string{
+		{"help"}, {"help", "reduce"}, {"rd", "-h"}, {"red", "-n", p}, {"rd", p}, {"rd", p}, // 같은 명령을 두 번 실행해도 영어 출력
+		{"nope"}, {"redcue"}, {"re"}, {"simplify", "-n", p}, {"rd", "-k", "-1"}, {"pack"}, {"rd", filepath.Join(dir, "missing.png")},
+	}
+	for _, args := range cmds {
+		out := captureOutput(t, func() { run(args) })
+		if out == "" || hangul.MatchString(out) {
+			t.Errorf("%v: expected non-empty English output, got:\n%s", args, out)
+		}
+	}
+	// 같은 명령이 한국어로는 한글을 출력합니다.
+	out := captureOutput(t, func() { run([]string{"help", "--lang", "ko"}) })
+	if !hangul.MatchString(out) || !strings.Contains(out, "공통 동작:") {
+		t.Errorf("--lang ko help: %s", out)
+	}
+	t.Setenv(langEnv, "ko")
+	out = captureOutput(t, func() { run([]string{"nope"}) })
+	if !strings.Contains(out, "알 수 없는 명령: nope") {
+		t.Errorf("env ko: %s", out)
+	}
+	_ = i18n.SetLanguage("en")
 }

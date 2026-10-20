@@ -18,6 +18,14 @@ export function ExpandPaths(arg1, arg2) {
   return window['go']['main']['App']['ExpandPaths'](arg1, arg2);
 }
 
+export function Language() {
+  return window['go']['main']['App']['Language']();
+}
+
+export function Languages() {
+  return window['go']['main']['App']['Languages']();
+}
+
 export function ListPalettes() {
   return window['go']['main']['App']['ListPalettes']();
 }
@@ -96,4 +104,8 @@ export function SetEditorDirty(arg1) {
 
 export function SetEditorDirtyCount(arg1) {
   return window['go']['main']['App']['SetEditorDirtyCount'](arg1);
+}
+
+export function SetLanguage(arg1) {
+  return window['go']['main']['App']['SetLanguage'](arg1);
 }

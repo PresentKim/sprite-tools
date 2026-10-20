@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"sprite-tools/pkg/common"
+	"sprite-tools/pkg/i18n"
 )
 
 var paletteNamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
@@ -26,7 +27,7 @@ var paletteNamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 func GetPalettesDir() (string, error) {
 	base, err := os.UserConfigDir()
 	if err != nil {
-		return "", fmt.Errorf("사용자 설정 폴더를 찾을 수 없습니다: %v", err)
+		return "", i18n.Errorf("err.palette.config_dir", err)
 	}
 	return filepath.Join(base, "sprite-tools", "palettes"), nil
 }
@@ -64,7 +65,7 @@ func ResolvePalette(spec string) (string, error) {
 	spec = strings.TrimSpace(spec)
 	if strings.EqualFold(filepath.Ext(spec), ".png") {
 		if _, err := os.Stat(spec); err != nil {
-			return "", fmt.Errorf("팔레트 파일을 찾을 수 없습니다: %s", spec)
+			return "", i18n.Errorf("err.palette.file_not_found", spec)
 		}
 		return spec, nil
 	}
@@ -75,7 +76,7 @@ func ResolvePalette(spec string) (string, error) {
 func DownloadPalette(name string) (string, error) {
 	cleanName := strings.ToLower(strings.TrimSpace(name))
 	if !paletteNamePattern.MatchString(cleanName) {
-		return "", fmt.Errorf("잘못된 팔레트 이름입니다: '%s' (영문 소문자, 숫자, '-'만 사용, 예: otterisk-96)", name)
+		return "", i18n.Errorf("err.palette.name_invalid_lospec", name)
 	}
 
 	palettesDir, err := EnsurePalettesDirExists()
@@ -85,12 +86,12 @@ func DownloadPalette(name string) (string, error) {
 	savePath := filepath.Join(palettesDir, cleanName+".png")
 
 	if _, err := common.LoadPNG(savePath); err == nil {
-		fmt.Printf("팔레트 캐시 사용: %s\n", savePath)
+		fmt.Println(i18n.T("msg.palette.cache", savePath))
 		return savePath, nil
 	}
 
 	url := fmt.Sprintf("https://lospec.com/palette-list/%s-1x.png", cleanName)
-	fmt.Printf("팔레트 다운로드 중: %s\n", url)
+	fmt.Println(i18n.T("msg.palette.downloading", url))
 	client := &http.Client{Timeout: 20 * time.Second}
 	req, err := http.NewRequest(http.MethodGet, url, nil)
 	if err != nil {
@@ -99,26 +100,26 @@ func DownloadPalette(name string) (string, error) {
 	req.Header.Set("User-Agent", "sprite-tools")
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("다운로드 실패 (네트워크 확인): %v", err)
+		return "", i18n.Errorf("err.palette.download_failed", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("Lospec에 없는 팔레트입니다: '%s' (HTTP %d). https://lospec.com/palette-list 에서 이름을 확인하세요", cleanName, resp.StatusCode)
+		return "", i18n.Errorf("err.palette.not_on_lospec", cleanName, resp.StatusCode)
 	}
 
 	bodyBytes, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
 	if err != nil {
-		return "", fmt.Errorf("응답 읽기 실패: %v", err)
+		return "", i18n.Errorf("err.palette.read_failed", err)
 	}
 	if _, err := png.Decode(bytes.NewReader(bodyBytes)); err != nil {
-		return "", fmt.Errorf("Lospec에 없는 팔레트입니다: '%s' (PNG 응답이 아님)", cleanName)
+		return "", i18n.Errorf("err.palette.not_png", cleanName)
 	}
 
 	if err := common.WriteFileAtomic(savePath, bodyBytes); err != nil {
-		return "", fmt.Errorf("팔레트 저장 실패: %v", err)
+		return "", i18n.Errorf("err.palette.save_failed", err)
 	}
-	fmt.Printf("팔레트 저장됨: %s\n", savePath)
+	fmt.Println(i18n.T("msg.palette.saved", savePath))
 	return savePath, nil
 }
 
@@ -174,7 +175,7 @@ func LoadPaletteColors(palettePath string) ([]color.NRGBA, []common.OKLab, error
 	}
 
 	if len(rawColors) == 0 {
-		return nil, nil, fmt.Errorf("팔레트 파일에서 유효한 색상을 찾을 수 없습니다: %s", palettePath)
+		return nil, nil, i18n.Errorf("err.palette.no_colors", palettePath)
 	}
 	return rawColors, oklabColors, nil
 }
@@ -228,5 +229,5 @@ func RecolorImage(src image.Image, paletteColors []color.NRGBA, paletteOKLabs []
 		dst.Pix[i], dst.Pix[i+1], dst.Pix[i+2], dst.Pix[i+3] = lastMatched.R, lastMatched.G, lastMatched.B, lastMatched.A
 	}
 
-	return dst, fmt.Sprintf("원본 색상 %d개 중 %d개 교체", len(colorCache), changed), nil
+	return dst, i18n.T("msg.recolor.result", len(colorCache), changed), nil
 }

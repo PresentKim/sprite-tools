@@ -1,3 +1,22 @@
+export namespace i18n {
+	
+	export class LangInfo {
+	    code: string;
+	    name: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new LangInfo(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.code = source["code"];
+	        this.name = source["name"];
+	    }
+	}
+
+}
+
 export namespace main {
 	
 	export class BackupPair {

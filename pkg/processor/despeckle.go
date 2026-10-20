@@ -1,10 +1,10 @@
 package processor
 
 import (
-	"fmt"
 	"image"
 
 	"sprite-tools/pkg/common"
+	"sprite-tools/pkg/i18n"
 )
 
 // Despeckle: 파일 단위 DespeckleImage.
@@ -19,15 +19,15 @@ func Despeckle(inputPath, outputPath string, minSize int, diagonal bool) (string
 // 지울 덩어리가 없으면 Skip 에러를 반환합니다.
 func DespeckleImage(src image.Image, minSize int, diagonal bool) (image.Image, string, error) {
 	if minSize < 1 {
-		return nil, "", fmt.Errorf("최소 크기는 1 이상이어야 합니다: %d", minSize)
+		return nil, "", i18n.Errorf("err.despeckle.min_size", minSize)
 	}
 	n := common.ToNRGBA(src)
 	w, h := n.Rect.Dx(), n.Rect.Dy()
 	if w == 0 || h == 0 {
-		return nil, "", common.Skip("빈 이미지, %dx%d", w, h)
+		return nil, "", common.Skip("skip.despeckle.empty", w, h)
 	}
 	if minSize == 1 {
-		return nil, "", common.Skip("최소 크기 1 은 지울 조각이 없음")
+		return nil, "", common.Skip("skip.despeckle.min1")
 	}
 
 	// 알파가 있는 픽셀 지도 (1 = 아직 보지 않은 내용 픽셀)
@@ -85,7 +85,7 @@ func DespeckleImage(src image.Image, minSize int, diagonal bool) (image.Image, s
 		pixels += len(queue)
 	}
 	if comps == 0 {
-		return nil, "", common.Skip("지울 작은 조각이 없음 (최소 크기 %d)", minSize)
+		return nil, "", common.Skip("skip.despeckle.none", minSize)
 	}
-	return dst, fmt.Sprintf("조각 %d개 제거 (픽셀 %d개)", comps, pixels), nil
+	return dst, i18n.T("msg.despeckle.result", comps, pixels), nil
 }

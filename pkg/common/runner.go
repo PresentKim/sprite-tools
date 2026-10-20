@@ -3,7 +3,6 @@ package common
 import (
 	"context"
 	"errors"
-	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -12,6 +11,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"sprite-tools/pkg/i18n"
 )
 
 // Task: 입력 파일 하나를 처리하고 결과 요약 메시지를 반환합니다.
@@ -22,9 +23,9 @@ type skipError struct{ msg string }
 
 func (e skipError) Error() string { return e.msg }
 
-// Skip: 실패가 아닌 "건너뜀"으로 집계될 에러를 만듭니다.
-func Skip(format string, a ...any) error {
-	return skipError{fmt.Sprintf(format, a...)}
+// Skip: 실패가 아닌 "건너뜀"으로 집계될 에러를 만듭니다. key 는 i18n 카탈로그(skip.*)의 키이고, 메시지는 만들어질 때의 언어로 고정됩니다.
+func Skip(key string, a ...any) error {
+	return skipError{i18n.T(key, a...)}
 }
 
 func IsSkip(err error) bool {
@@ -124,13 +125,13 @@ func (o Options) OutputFor(in Input) string {
 // 출력 폴더(OutDir)를 쓰면 접미사가 비어 있어도 되지만, 출력이 원본과 같은 경로가 되는 파일은 실행 시 실패로 처리됩니다.
 func (o Options) Validate() error {
 	if o.InPlace && o.OutDir != "" {
-		return errors.New("덮어쓰기(-w)와 출력 폴더(-o)는 함께 쓸 수 없습니다")
+		return i18n.Errorf("err.options.inplace_outdir")
 	}
 	if o.Backup && !o.InPlace {
-		return errors.New("원본 백업(-backup)은 덮어쓰기(-w)와 함께 쓸 때만 의미가 있습니다")
+		return i18n.Errorf("err.options.backup_needs_inplace")
 	}
 	if !o.InPlace && !o.NoOutput && o.Suffix == "" && o.OutDir == "" {
-		return errors.New("출력 접미사가 비어 있습니다. 원본을 덮어쓰려면 덮어쓰기(-w)를, 다른 폴더에 저장하려면 출력 폴더(-o)를 사용하세요")
+		return i18n.Errorf("err.options.empty_suffix")
 	}
 	return nil
 }
@@ -163,7 +164,7 @@ func (o Options) PlanOutputs(inputs []Input) []Plan {
 			continue
 		}
 		if SamePath(in.Path, out) {
-			plans[i].Err = errors.New("출력 경로가 원본과 같아 덮어쓰게 됩니다. 접미사를 지정하거나 다른 출력 폴더를 사용하세요")
+			plans[i].Err = i18n.Errorf("err.plan.same_as_input")
 			continue
 		}
 		abs, err := filepath.Abs(out)
@@ -172,7 +173,7 @@ func (o Options) PlanOutputs(inputs []Input) []Plan {
 		}
 		key := strings.ToLower(abs)
 		if prev, ok := claimed[key]; ok {
-			plans[i].Err = fmt.Errorf("출력 경로가 %s 와 겹칩니다", inputs[prev].Path)
+			plans[i].Err = i18n.Errorf("err.plan.collision", inputs[prev].Path)
 			continue
 		}
 		claimed[key] = i
@@ -214,7 +215,7 @@ func CollectInputs(o Options) ([]Input, error) {
 		pattern = "*.png"
 	}
 	if _, err := filepath.Match(pattern, ""); err != nil {
-		return nil, fmt.Errorf("잘못된 파일 패턴 '%s': %v", o.Pattern, err)
+		return nil, i18n.Errorf("err.path.bad_pattern", o.Pattern, err)
 	}
 
 	excludeDirs := o.ExcludeDirs
@@ -253,7 +254,7 @@ func CollectInputs(o Options) ([]Input, error) {
 	for _, root := range roots {
 		info, err := os.Stat(root)
 		if err != nil {
-			return nil, fmt.Errorf("경로를 찾을 수 없습니다: %s", root)
+			return nil, i18n.Errorf("err.path.not_found", root)
 		}
 		if !info.IsDir() {
 			// 직접 지정한 파일은 패턴과 관계없이 처리합니다.
@@ -402,15 +403,15 @@ func backupFile(in, stamp string) (string, error) {
 		return "", nil
 	}
 	if err != nil {
-		return "", fmt.Errorf("원본 백업 실패: %v", err)
+		return "", i18n.Errorf("err.backup.failed", err)
 	}
 	dir := filepath.Join(filepath.Dir(in), BackupDirName, stamp)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return "", fmt.Errorf("원본 백업 실패: %v", err)
+		return "", i18n.Errorf("err.backup.failed", err)
 	}
 	dst := filepath.Join(dir, filepath.Base(in))
 	if err := WriteFileAtomic(dst, data); err != nil {
-		return "", fmt.Errorf("원본 백업 실패: %v", err)
+		return "", i18n.Errorf("err.backup.failed", err)
 	}
 	return dst, nil
 }
@@ -449,14 +450,14 @@ func RestoreBackup(backup, dest string) error {
 	if filepath.Base(backupRoot) != BackupDirName ||
 		!strings.EqualFold(filepath.Dir(backupRoot), filepath.Dir(dest)) ||
 		!strings.EqualFold(filepath.Base(backup), filepath.Base(dest)) {
-		return fmt.Errorf("백업 파일과 복원 위치가 맞지 않습니다: %s -> %s", backup, dest)
+		return i18n.Errorf("err.backup.mismatch", backup, dest)
 	}
 	data, err := os.ReadFile(backup)
 	if err != nil {
-		return fmt.Errorf("백업 파일을 읽을 수 없습니다: %v", err)
+		return i18n.Errorf("err.backup.read", err)
 	}
 	if err := WriteFileAtomic(dest, data); err != nil {
-		return fmt.Errorf("복원 실패: %v", err)
+		return i18n.Errorf("err.backup.restore_failed", err)
 	}
 	return nil
 }
@@ -465,7 +466,7 @@ func RestoreBackup(backup, dest string) error {
 func runTask(task Task, in, out string) (msg string, err error) {
 	defer func() {
 		if r := recover(); r != nil {
-			err = fmt.Errorf("내부 오류: %v", r)
+			err = i18n.Errorf("err.internal", r)
 		}
 	}()
 	return task(in, out)

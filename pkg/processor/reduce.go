@@ -1,11 +1,11 @@
 package processor
 
 import (
-	"fmt"
 	"image"
 	"slices"
 
 	"sprite-tools/pkg/common"
+	"sprite-tools/pkg/i18n"
 )
 
 // reduceData: reduce 에 필요한 색상 목록과 픽셀별 색상 번호입니다.
@@ -116,21 +116,21 @@ func ReduceImage(src image.Image, threshold float64) (image.Image, string, error
 		finalCount++
 	}
 	if origCount == finalCount {
-		return nil, "", common.Skip("합칠 색상 없음, 색상 %d개", origCount)
+		return nil, "", common.Skip("skip.reduce.nothing", origCount)
 	}
-	return d.apply(repOf), fmt.Sprintf("색상 %d → %d", origCount, finalCount), nil
+	return d.apply(repOf), i18n.T("msg.reduce.result", origCount, finalCount), nil
 }
 
 // ReduceToCount: 불투명 색상이 maxColors 개 이하가 되는 가장 작은 기준값을 이분 탐색으로 찾아 ReduceImage 와 같은 방식으로 합칩니다.
 // 이미 maxColors 개 이하면 Skip 에러를 반환합니다.
 func ReduceToCount(src image.Image, maxColors int) (image.Image, string, error) {
 	if maxColors < 1 {
-		return nil, "", fmt.Errorf("최대 색상 수는 1 이상이어야 합니다: %d", maxColors)
+		return nil, "", i18n.Errorf("err.reduce.max_colors", maxColors)
 	}
 	d := newReduceData(src)
 	orig := len(d.keys)
 	if orig <= maxColors {
-		return nil, "", common.Skip("이미 색상 %d개 (최대 %d개 이하)", orig, maxColors)
+		return nil, "", common.Skip("skip.reduce.already", orig, maxColors)
 	}
 
 	// 상한에서도 목표를 못 맞추면 기준값을 크게 늘려 한 번 더 시도합니다.
@@ -138,7 +138,7 @@ func ReduceToCount(src image.Image, maxColors int) (image.Image, string, error) 
 	if _, n := d.cluster(hi); n > maxColors {
 		hi = 8.0
 		if _, n := d.cluster(hi); n > maxColors {
-			return nil, "", fmt.Errorf("색상을 %d개 이하로 줄일 수 없습니다", maxColors)
+			return nil, "", i18n.Errorf("err.reduce.cannot", maxColors)
 		}
 	}
 	for i := 0; i < 20; i++ {
@@ -150,7 +150,7 @@ func ReduceToCount(src image.Image, maxColors int) (image.Image, string, error) 
 		}
 	}
 	repOf, repCount := d.cluster(hi)
-	return d.apply(repOf), fmt.Sprintf("색상 %d → %d (기준 %.3f)", orig, repCount, hi), nil
+	return d.apply(repOf), i18n.T("msg.reduce.result_max", orig, repCount, hi), nil
 }
 
 // ReduceMax: 파일 단위 ReduceToCount.

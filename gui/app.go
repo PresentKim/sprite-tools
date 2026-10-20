@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
-	"errors"
 	"fmt"
 	"image"
 	"image/color"
@@ -23,6 +22,7 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 
 	"sprite-tools/pkg/common"
+	"sprite-tools/pkg/i18n"
 	"sprite-tools/pkg/processor"
 )
 
@@ -202,7 +202,7 @@ func describeFile(path string) FileEntry {
 	}
 	cfg, err := png.DecodeConfig(f)
 	if err != nil {
-		e.Error = "PNG 파일이 아니거나 손상됨"
+		e.Error = i18n.T("err.png.invalid_short")
 		return e
 	}
 	e.Width, e.Height = cfg.Width, cfg.Height
@@ -211,8 +211,8 @@ func describeFile(path string) FileEntry {
 
 func (a *App) PickFiles() ([]string, error) {
 	return runtime.OpenMultipleFilesDialog(a.ctx, runtime.OpenDialogOptions{
-		Title:   "PNG 파일 선택",
-		Filters: []runtime.FileFilter{{DisplayName: "PNG 이미지 (*.png)", Pattern: "*.png"}},
+		Title:   i18n.T("gui.dialog.open_png"),
+		Filters: []runtime.FileFilter{{DisplayName: i18n.T("gui.dialog.filter_png"), Pattern: "*.png"}},
 	})
 }
 
@@ -222,8 +222,8 @@ func (a *App) PickFolder(title string) (string, error) {
 
 func (a *App) PickPaletteFile() (string, error) {
 	return runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
-		Title:   "팔레트 PNG 선택",
-		Filters: []runtime.FileFilter{{DisplayName: "PNG 이미지 (*.png)", Pattern: "*.png"}},
+		Title:   i18n.T("gui.dialog.open_palette"),
+		Filters: []runtime.FileFilter{{DisplayName: i18n.T("gui.dialog.filter_png"), Pattern: "*.png"}},
 	})
 }
 
@@ -264,20 +264,20 @@ func (a *App) imageMiddleware(next http.Handler) http.Handler {
 func parseFrameSize(s string) (int, int, error) {
 	parts := strings.Split(strings.ToLower(strings.TrimSpace(s)), "x")
 	if len(parts) == 0 || len(parts) > 2 {
-		return 0, 0, fmt.Errorf("프레임 크기 형식이 잘못되었습니다 (예: 16 또는 16x24)")
+		return 0, 0, i18n.Errorf("err.gui.frame_size_format")
 	}
 	w, err := strconv.Atoi(strings.TrimSpace(parts[0]))
 	if err != nil {
-		return 0, 0, fmt.Errorf("프레임 크기 형식이 잘못되었습니다 (예: 16 또는 16x24)")
+		return 0, 0, i18n.Errorf("err.gui.frame_size_format")
 	}
 	h := w
 	if len(parts) == 2 {
 		if h, err = strconv.Atoi(strings.TrimSpace(parts[1])); err != nil {
-			return 0, 0, fmt.Errorf("프레임 크기 형식이 잘못되었습니다 (예: 16 또는 16x24)")
+			return 0, 0, i18n.Errorf("err.gui.frame_size_format")
 		}
 	}
 	if w <= 0 || h <= 0 {
-		return 0, 0, fmt.Errorf("프레임 크기는 0보다 커야 합니다")
+		return 0, 0, i18n.Errorf("err.gui.frame_size_positive")
 	}
 	return w, h, nil
 }
@@ -285,7 +285,7 @@ func parseFrameSize(s string) (int, int, error) {
 func (a *App) palette(spec string) (*loadedPalette, error) {
 	spec = strings.TrimSpace(spec)
 	if spec == "" {
-		return nil, errors.New("팔레트를 선택하세요")
+		return nil, i18n.Errorf("err.gui.palette_required")
 	}
 	a.palMu.Lock()
 	defer a.palMu.Unlock()
@@ -310,7 +310,7 @@ func (a *App) imageFunc(req JobRequest) (func(image.Image) (image.Image, string,
 	switch req.Command {
 	case "reduce":
 		if req.MaxColors < 0 {
-			return nil, errors.New("최대 색상 수는 1 이상이어야 합니다")
+			return nil, i18n.Errorf("err.gui.max_colors")
 		}
 		if req.MaxColors > 0 {
 			return func(src image.Image) (image.Image, string, error) {
@@ -318,35 +318,35 @@ func (a *App) imageFunc(req JobRequest) (func(image.Image) (image.Image, string,
 			}, nil
 		}
 		if req.Threshold <= 0 {
-			return nil, errors.New("병합 강도는 0보다 커야 합니다")
+			return nil, i18n.Errorf("err.gui.threshold")
 		}
 		return func(src image.Image) (image.Image, string, error) {
 			return processor.ReduceImage(src, req.Threshold)
 		}, nil
 	case "downscale":
 		if req.Scale < 0 || req.Scale == 1 {
-			return nil, errors.New("배율은 2 이상이거나 자동이어야 합니다")
+			return nil, i18n.Errorf("err.gui.downscale_scale")
 		}
 		return func(src image.Image) (image.Image, string, error) {
 			return processor.DownscaleImage(src, req.Scale)
 		}, nil
 	case "upscale":
 		if req.Scale < processor.MinUpscale || req.Scale > processor.MaxUpscale {
-			return nil, fmt.Errorf("확대 배율은 %d~%d 사이여야 합니다", processor.MinUpscale, processor.MaxUpscale)
+			return nil, i18n.Errorf("err.gui.upscale_range", processor.MinUpscale, processor.MaxUpscale)
 		}
 		return func(src image.Image) (image.Image, string, error) {
 			return processor.UpscaleImage(src, req.Scale)
 		}, nil
 	case "trim":
 		if req.Pad < 0 {
-			return nil, errors.New("여백은 0 이상이어야 합니다")
+			return nil, i18n.Errorf("err.gui.pad")
 		}
 		return func(src image.Image) (image.Image, string, error) {
 			return processor.TrimImage(src, req.Pad)
 		}, nil
 	case "despeckle":
 		if req.MinSize < 1 {
-			return nil, errors.New("최소 크기는 1 이상이어야 합니다")
+			return nil, i18n.Errorf("err.gui.min_size")
 		}
 		return func(src image.Image) (image.Image, string, error) {
 			return processor.DespeckleImage(src, req.MinSize, req.Diagonal)
@@ -364,7 +364,7 @@ func (a *App) imageFunc(req JobRequest) (func(image.Image) (image.Image, string,
 			return processor.RecolorImage(src, p.colors, p.labs)
 		}, nil
 	}
-	return nil, fmt.Errorf("알 수 없는 명령: %s", req.Command)
+	return nil, i18n.Errorf("err.gui.unknown_command", req.Command)
 }
 
 // buildTask: 요청을 실행할 작업과 옵션으로 바꿉니다. produced 는 작업이 출력 경로를 직접 정하는 경우(slice)
@@ -432,10 +432,10 @@ func (a *App) buildTask(req JobRequest, produced func(paths []string)) (common.T
 // Run: 파일들을 백그라운드에서 처리합니다. 진행 상황은 "job:result", 완료는 "job:done" 이벤트로 전달됩니다.
 func (a *App) Run(req JobRequest, files []InputFile) error {
 	if len(files) == 0 {
-		return errors.New("처리할 파일이 없습니다")
+		return i18n.Errorf("err.gui.no_files")
 	}
 	if req.Command == "extract" && strings.TrimSpace(req.SaveName) != "" && len(files) > 1 {
-		return fmt.Errorf("팔레트 목록에 저장은 파일이 하나일 때만 쓸 수 있습니다 (대상 %d개)", len(files))
+		return i18n.Errorf("err.gui.save_single", len(files))
 	}
 	var outMu sync.Mutex
 	var outputs []string // 이번 실행으로 새로 만들어진 파일 (덮어쓴 원본은 제외)
@@ -455,7 +455,7 @@ func (a *App) Run(req JobRequest, files []InputFile) error {
 	a.mu.Lock()
 	if a.cancelJob != nil {
 		a.mu.Unlock()
-		return errors.New("이미 작업이 진행 중입니다")
+		return i18n.Errorf("err.gui.job_running")
 	}
 	ctx, cancel := context.WithCancel(a.ctx)
 	a.cancelJob = cancel
@@ -511,12 +511,12 @@ func (a *App) RestoreBackups(pairs []BackupPair) (RestoreReport, error) {
 	busy := a.cancelJob != nil
 	a.mu.Unlock()
 	if busy {
-		return RestoreReport{}, errors.New("작업이 진행 중입니다. 끝난 뒤에 되돌리세요")
+		return RestoreReport{}, i18n.Errorf("err.gui.job_running_restore")
 	}
 	rep := RestoreReport{Errors: []string{}}
 	for _, p := range pairs {
 		if !strings.EqualFold(filepath.Ext(p.Path), ".png") {
-			rep.Errors = append(rep.Errors, fmt.Sprintf("%s: PNG 파일이 아닙니다", p.Path))
+			rep.Errors = append(rep.Errors, i18n.T("err.gui.not_png", p.Path))
 			continue
 		}
 		if err := common.RestoreBackup(p.Backup, p.Path); err != nil {
@@ -714,7 +714,7 @@ func hex(c color.NRGBA) string {
 
 func packSheet(req JobRequest, paths []string) (*image.NRGBA, string, error) {
 	if len(paths) == 0 {
-		return nil, "", errors.New("합칠 파일이 없습니다")
+		return nil, "", i18n.Errorf("err.gui.pack_none")
 	}
 	images, err := processor.LoadImages(processor.SortedPaths(paths))
 	if err != nil {
@@ -748,17 +748,17 @@ func (a *App) PreviewPack(req JobRequest, paths []string) PreviewResult {
 // 저장 대화상자가 덮어쓰기 여부를 확인하므로 기존 파일은 덮어쓰되, 입력 파일을 덮어쓰는 경로는 거부합니다.
 func (a *App) RunPack(req JobRequest, paths []string) (PackResult, error) {
 	if len(paths) == 0 {
-		return PackResult{}, errors.New("합칠 파일이 없습니다")
+		return PackResult{}, i18n.Errorf("err.gui.pack_none")
 	}
 	sorted := processor.SortedPaths(paths)
 	if _, _, err := packSheet(req, sorted); err != nil {
 		return PackResult{}, err
 	}
 	out, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
-		Title:                "시트 저장",
+		Title:                i18n.T("gui.dialog.save_sheet"),
 		DefaultDirectory:     filepath.Dir(sorted[0]),
 		DefaultFilename:      "sheet.png",
-		Filters:              []runtime.FileFilter{{DisplayName: "PNG 이미지 (*.png)", Pattern: "*.png"}},
+		Filters:              []runtime.FileFilter{{DisplayName: i18n.T("gui.dialog.filter_png"), Pattern: "*.png"}},
 		CanCreateDirectories: true,
 	})
 	if err != nil {

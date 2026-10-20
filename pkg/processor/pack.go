@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"sprite-tools/pkg/common"
+	"sprite-tools/pkg/i18n"
 )
 
 // PackImages: 이미지들을 한 장의 스프라이트 시트로 합칩니다 (slice 의 반대).
@@ -23,13 +24,13 @@ func PackImages(images []image.Image, cols, gap int) (*image.NRGBA, string, erro
 // PackSheet: PackImages 와 같지만 center 가 true 면 작은 이미지를 칸의 가운데에 놓습니다.
 func PackSheet(images []image.Image, cols, gap int, center bool) (*image.NRGBA, string, error) {
 	if len(images) == 0 {
-		return nil, "", errors.New("합칠 이미지가 없습니다")
+		return nil, "", i18n.Errorf("err.pack.no_images")
 	}
 	if gap < 0 {
-		return nil, "", fmt.Errorf("간격은 0 이상이어야 합니다: %d", gap)
+		return nil, "", i18n.Errorf("err.pack.gap", gap)
 	}
 	if cols < 0 {
-		return nil, "", fmt.Errorf("열 수는 0 이상이어야 합니다: %d", cols)
+		return nil, "", i18n.Errorf("err.pack.cols", cols)
 	}
 	count := len(images)
 	if cols == 0 {
@@ -46,11 +47,11 @@ func PackSheet(images []image.Image, cols, gap int, center bool) (*image.NRGBA, 
 		cellH = max(cellH, nrgba[i].Rect.Dy())
 	}
 	if cellW == 0 || cellH == 0 {
-		return nil, "", errors.New("크기가 0인 이미지가 있습니다")
+		return nil, "", i18n.Errorf("err.pack.zero_size")
 	}
 	sheetW, sheetH := cols*cellW+(cols-1)*gap, rows*cellH+(rows-1)*gap
 	if sheetW*sheetH > maxOutputPixels {
-		return nil, "", fmt.Errorf("시트가 너무 큽니다: %dx%d", sheetW, sheetH)
+		return nil, "", i18n.Errorf("err.pack.sheet_too_large", sheetW, sheetH)
 	}
 
 	dst := image.NewNRGBA(image.Rect(0, 0, sheetW, sheetH))
@@ -67,7 +68,7 @@ func PackSheet(images []image.Image, cols, gap int, center bool) (*image.NRGBA, 
 			copy(dst.Pix[do:do+w*4], n.Pix[so:so+w*4])
 		}
 	}
-	msg := fmt.Sprintf("%d프레임 → %dx%d 시트, %dx%d", count, cols, rows, sheetW, sheetH)
+	msg := i18n.T("msg.pack.result", count, cols, rows, sheetW, sheetH)
 	return dst, msg, nil
 }
 
@@ -91,14 +92,14 @@ func LoadImages(paths []string) ([]image.Image, error) {
 	return images, nil
 }
 
-// ErrOutputExists: 출력 파일이 이미 있고 덮어쓰기가 허용되지 않았을 때 반환됩니다.
-var ErrOutputExists = errors.New("출력 파일이 이미 있습니다")
+// ErrOutputExists: 출력 파일이 이미 있고 덮어쓰기가 허용되지 않았을 때 반환됩니다. (errors.Is 용 표식이며 사용자에게는 현지화된 메시지가 보입니다)
+var ErrOutputExists = errors.New("output file already exists")
 
 // CheckPackOutput: 시트 출력 경로가 안전한지 확인합니다.
 // 입력 파일을 덮어쓰는 경로는 항상 거부하고, 이미 있는 다른 파일은 force 가 아니면 ErrOutputExists 로 거부합니다.
 func CheckPackOutput(inputs []string, outPath string, force bool) error {
 	if !strings.EqualFold(filepath.Ext(outPath), ".png") {
-		return fmt.Errorf("출력 파일은 .png 여야 합니다: %s", outPath)
+		return i18n.Errorf("err.pack.not_png", outPath)
 	}
 	absOut, err := filepath.Abs(outPath)
 	if err != nil {
@@ -106,15 +107,15 @@ func CheckPackOutput(inputs []string, outPath string, force bool) error {
 	}
 	for _, in := range inputs {
 		if absIn, err := filepath.Abs(in); err == nil && strings.EqualFold(absIn, absOut) {
-			return fmt.Errorf("출력 파일이 입력 파일과 같아 덮어쓰게 됩니다: %s", outPath)
+			return i18n.Errorf("err.pack.same_as_input", outPath)
 		}
 	}
 	if st, err := os.Stat(outPath); err == nil {
 		if st.IsDir() {
-			return fmt.Errorf("출력 경로가 폴더입니다: %s", outPath)
+			return i18n.Errorf("err.pack.is_dir", outPath)
 		}
 		if !force {
-			return fmt.Errorf("%w: %s (덮어쓰려면 -force)", ErrOutputExists, outPath)
+			return i18n.Wrap(ErrOutputExists, "err.pack.output_exists", outPath)
 		}
 	}
 	return nil

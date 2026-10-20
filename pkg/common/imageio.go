@@ -2,12 +2,13 @@ package common
 
 import (
 	"bytes"
-	"fmt"
 	"image"
 	"image/draw"
 	"image/png"
 	"os"
 	"path/filepath"
+
+	"sprite-tools/pkg/i18n"
 )
 
 // LoadPNG: PNG 파일을 메모리로 읽어 디코딩합니다. 파일 핸들은 즉시 닫히므로 같은 경로에 바로 덮어쓸 수 있습니다.
@@ -18,7 +19,7 @@ func LoadPNG(path string) (image.Image, error) {
 	}
 	img, err := png.Decode(bytes.NewReader(data))
 	if err != nil {
-		return nil, fmt.Errorf("PNG 파일이 아니거나 손상됨: %v", err)
+		return nil, i18n.Errorf("err.png.invalid", err)
 	}
 	return img, nil
 }

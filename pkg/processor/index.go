@@ -1,11 +1,11 @@
 package processor
 
 import (
-	"fmt"
 	"image"
 	"image/color"
 
 	"sprite-tools/pkg/common"
+	"sprite-tools/pkg/i18n"
 )
 
 // Index: 파일 단위 IndexImage.
@@ -36,7 +36,7 @@ func IndexImage(src image.Image) (image.Image, string, error) {
 			idx, ok := index[key]
 			if !ok {
 				if len(pal) >= 256 {
-					return nil, "", fmt.Errorf("색상이 255개를 넘어 팔레트로 만들 수 없습니다. 먼저 reduce 나 recolor 로 색상을 줄이세요")
+					return nil, "", i18n.Errorf("err.index.too_many_colors")
 				}
 				idx = uint8(len(pal))
 				index[key] = idx
@@ -47,5 +47,5 @@ func IndexImage(src image.Image) (image.Image, string, error) {
 		dst.Pix[i] = lastIdx
 	}
 	dst.Palette = pal
-	return dst, fmt.Sprintf("팔레트 %d색, 0번 투명", len(pal)), nil
+	return dst, i18n.T("msg.index.result", len(pal)), nil
 }

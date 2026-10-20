@@ -1,10 +1,10 @@
 package processor
 
 import (
-	"fmt"
 	"image"
 
 	"sprite-tools/pkg/common"
+	"sprite-tools/pkg/i18n"
 )
 
 // Trim: 파일 단위 TrimImage.
@@ -39,21 +39,21 @@ func opaqueBounds(n *image.NRGBA) (r image.Rectangle, ok bool) {
 // 결과가 원본과 같으면, 또는 완전히 투명한 이미지면 Skip 에러를 반환합니다.
 func TrimImage(src image.Image, pad int) (image.Image, string, error) {
 	if pad < 0 {
-		return nil, "", fmt.Errorf("여백은 0 이상이어야 합니다: %d", pad)
+		return nil, "", i18n.Errorf("err.trim.pad", pad)
 	}
 	n := common.ToNRGBA(src)
 	w, h := n.Rect.Dx(), n.Rect.Dy()
 	box, ok := opaqueBounds(n)
 	if !ok {
-		return nil, "", common.Skip("완전히 투명한 이미지라 자를 기준이 없음, %dx%d", w, h)
+		return nil, "", common.Skip("skip.trim.transparent", w, h)
 	}
 	newW, newH := box.Dx()+2*pad, box.Dy()+2*pad
 	if newW*newH > maxOutputPixels {
-		return nil, "", fmt.Errorf("결과가 너무 큽니다: %dx%d", newW, newH)
+		return nil, "", i18n.Errorf("err.result_too_large", newW, newH)
 	}
 	// 경계 상자에 여백을 더한 영역이 이미지 전체와 같으면 달라지는 것이 없습니다.
 	if box.Min.X-pad == 0 && box.Min.Y-pad == 0 && newW == w && newH == h {
-		return nil, "", common.Skip("이미 여백 %d 로 맞음, %dx%d", pad, w, h)
+		return nil, "", common.Skip("skip.trim.unchanged", pad, w, h)
 	}
 
 	dst := image.NewNRGBA(image.Rect(0, 0, newW, newH))
@@ -62,5 +62,5 @@ func TrimImage(src image.Image, pad int) (image.Image, string, error) {
 		do := (y+pad)*dst.Stride + pad*4
 		copy(dst.Pix[do:do+box.Dx()*4], n.Pix[so:so+box.Dx()*4])
 	}
-	return dst, fmt.Sprintf("%dx%d → %dx%d (여백 %d)", w, h, newW, newH, pad), nil
+	return dst, i18n.T("msg.trim.result", w, h, newW, newH, pad), nil
 }

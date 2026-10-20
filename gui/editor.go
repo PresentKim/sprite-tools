@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
-	"errors"
 	"fmt"
 	"image"
 	"image/color"
@@ -16,6 +15,7 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 
 	"sprite-tools/pkg/common"
+	"sprite-tools/pkg/i18n"
 	"sprite-tools/pkg/processor"
 )
 
@@ -62,9 +62,9 @@ func (a *App) SetEditorDirtyCount(n int) {
 // dirtyMessage: 종료 확인 창에 보여 줄 안내 문구입니다.
 func dirtyMessage(n int) string {
 	if n <= 1 {
-		return "편집기에 저장하지 않은 변경 사항이 있습니다. 저장하지 않고 종료할까요?"
+		return i18n.T("gui.dialog.unsaved.message_one")
 	}
-	return fmt.Sprintf("편집기에 저장하지 않은 문서 %d개가 있습니다. 저장하지 않고 종료할까요?", n)
+	return i18n.T("gui.dialog.unsaved.message_many", n)
 }
 
 // beforeClose: 편집기에 저장하지 않은 변경이 있으면 종료 전에 한 번 더 묻습니다. true 를 반환하면 종료를 막습니다.
@@ -73,18 +73,19 @@ func (a *App) beforeClose(ctx context.Context) bool {
 	if n <= 0 {
 		return false
 	}
+	quit, cancel := i18n.T("gui.dialog.unsaved.quit"), i18n.T("gui.dialog.unsaved.cancel")
 	choice, err := runtime.MessageDialog(ctx, runtime.MessageDialogOptions{
 		Type:          runtime.QuestionDialog,
-		Title:         "종료",
+		Title:         i18n.T("gui.dialog.unsaved.title"),
 		Message:       dirtyMessage(n),
-		Buttons:       []string{"종료", "취소"},
-		DefaultButton: "취소",
-		CancelButton:  "취소",
+		Buttons:       []string{quit, cancel},
+		DefaultButton: cancel,
+		CancelButton:  cancel,
 	})
 	if err != nil {
 		return false
 	}
-	return choice != "종료" && choice != "Yes"
+	return choice != quit && choice != "Yes"
 }
 
 // LoadImageRGBA: PNG 를 Go 에서 디코딩해 정밀한 RGBA 픽셀로 돌려줍니다 (브라우저 캔버스의 알파 반올림을 피하기 위함).
@@ -95,7 +96,7 @@ func (a *App) LoadImageRGBA(path string) (EditorImage, error) {
 func loadImageRGBA(path string) (EditorImage, error) {
 	path = absPath(path)
 	if !strings.EqualFold(filepath.Ext(path), ".png") {
-		return EditorImage{}, errors.New("PNG 파일만 열 수 있습니다")
+		return EditorImage{}, i18n.Errorf("err.gui.open_png_only")
 	}
 	img, err := common.LoadPNG(path)
 	if err != nil {
@@ -104,7 +105,7 @@ func loadImageRGBA(path string) (EditorImage, error) {
 	b := img.Bounds()
 	w, h := b.Dx(), b.Dy()
 	if w > maxEditorSide || h > maxEditorSide || w*h > maxEditorPixels {
-		return EditorImage{}, fmt.Errorf("이미지가 너무 큽니다 (%d×%d, 최대 %d×%d 또는 %d만 픽셀)", w, h, maxEditorSide, maxEditorSide, maxEditorPixels/10000)
+		return EditorImage{}, i18n.Errorf("err.gui.image_too_large", w, h, maxEditorSide, maxEditorSide, maxEditorPixels/10000)
 	}
 	out := EditorImage{Path: path, Width: w, Height: h}
 	var pix []byte
@@ -140,9 +141,9 @@ func (a *App) SaveImageRGBA(path string, width, height int, pixelsB64 string, ba
 // SaveImageAs: 저장 대화상자로 위치를 고른 뒤 저장합니다. paletteFrom 은 인덱스 PNG 의 팔레트를 이어받을 원본 경로입니다(없으면 빈 값).
 func (a *App) SaveImageAs(paletteFrom, suggest string, width, height int, pixelsB64 string, backup bool) (SaveResult, error) {
 	opts := runtime.SaveDialogOptions{
-		Title:                "다른 이름으로 저장",
+		Title:                i18n.T("gui.dialog.save_as"),
 		DefaultFilename:      suggest,
-		Filters:              []runtime.FileFilter{{DisplayName: "PNG 이미지 (*.png)", Pattern: "*.png"}},
+		Filters:              []runtime.FileFilter{{DisplayName: i18n.T("gui.dialog.filter_png"), Pattern: "*.png"}},
 		CanCreateDirectories: true,
 	}
 	if paletteFrom != "" {
@@ -168,17 +169,17 @@ func (a *App) SaveImageAs(paletteFrom, suggest string, width, height int, pixels
 func saveImageRGBA(path, paletteFrom string, width, height int, pixelsB64 string, backup bool) (SaveResult, error) {
 	path = absPath(path)
 	if !strings.EqualFold(filepath.Ext(path), ".png") {
-		return SaveResult{}, errors.New("PNG 파일로만 저장할 수 있습니다 (확장자 .png)")
+		return SaveResult{}, i18n.Errorf("err.gui.save_png_only")
 	}
 	if width <= 0 || height <= 0 || width > maxEditorSide || height > maxEditorSide || width*height > maxEditorPixels {
-		return SaveResult{}, fmt.Errorf("이미지 크기가 올바르지 않습니다: %d×%d", width, height)
+		return SaveResult{}, i18n.Errorf("err.gui.bad_size", width, height)
 	}
 	pix, err := base64.StdEncoding.DecodeString(pixelsB64)
 	if err != nil {
-		return SaveResult{}, fmt.Errorf("픽셀 데이터를 해석할 수 없습니다: %v", err)
+		return SaveResult{}, i18n.Errorf("err.gui.pixel_decode", err)
 	}
 	if len(pix) != width*height*4 {
-		return SaveResult{}, fmt.Errorf("픽셀 데이터 크기가 맞지 않습니다 (%d바이트, 필요 %d바이트)", len(pix), width*height*4)
+		return SaveResult{}, i18n.Errorf("err.gui.pixel_len", len(pix), width*height*4)
 	}
 
 	// 원본 팔레트는 덮어쓰기 전에 읽어 둡니다.
@@ -364,17 +365,17 @@ var editorCommands = map[string]bool{"reduce": true, "recolor": true, "downscale
 // 파일을 건드리지 않으며, 처리할 것이 없으면(Skip) 오류 없이 Skipped 로 알립니다.
 func (a *App) ProcessPixels(req JobRequest, width, height int, pixelsB64 string) (ProcessResult, error) {
 	if !editorCommands[req.Command] {
-		return ProcessResult{}, fmt.Errorf("편집기에서는 쓸 수 없는 명령입니다: %s", req.Command)
+		return ProcessResult{}, i18n.Errorf("err.gui.editor_command", req.Command)
 	}
 	if width <= 0 || height <= 0 || width > maxEditorSide || height > maxEditorSide || width*height > maxEditorPixels {
-		return ProcessResult{}, fmt.Errorf("이미지 크기가 올바르지 않습니다: %d×%d", width, height)
+		return ProcessResult{}, i18n.Errorf("err.gui.bad_size", width, height)
 	}
 	pix, err := base64.StdEncoding.DecodeString(pixelsB64)
 	if err != nil {
-		return ProcessResult{}, fmt.Errorf("픽셀 데이터를 해석할 수 없습니다: %v", err)
+		return ProcessResult{}, i18n.Errorf("err.gui.pixel_decode", err)
 	}
 	if len(pix) != width*height*4 {
-		return ProcessResult{}, fmt.Errorf("픽셀 데이터 크기가 맞지 않습니다 (%d바이트, 필요 %d바이트)", len(pix), width*height*4)
+		return ProcessResult{}, i18n.Errorf("err.gui.pixel_len", len(pix), width*height*4)
 	}
 	fn, err := a.imageFunc(req)
 	if err != nil {
@@ -391,7 +392,7 @@ func (a *App) ProcessPixels(req JobRequest, width, height int, pixelsB64 string)
 	n := common.ToNRGBA(dst)
 	w, h := n.Rect.Dx(), n.Rect.Dy()
 	if w > maxEditorSide || h > maxEditorSide || w*h > maxEditorPixels {
-		return ProcessResult{}, fmt.Errorf("결과가 편집기 한도를 넘습니다 (%d×%d)", w, h)
+		return ProcessResult{}, i18n.Errorf("err.gui.result_too_large", w, h)
 	}
 	return ProcessResult{Message: msg, Width: w, Height: h, Pixels: base64.StdEncoding.EncodeToString(n.Pix)}, nil
 }
@@ -399,20 +400,20 @@ func (a *App) ProcessPixels(req JobRequest, width, height int, pixelsB64 string)
 // paletteStrip: "#rrggbb" 목록을 팔레트 PNG(색 1개 = 1px, 한 줄)로 만듭니다. 투명도는 무시하고 불투명 색으로 저장합니다.
 func paletteStrip(colors []string) (image.Image, error) {
 	if len(colors) == 0 {
-		return nil, errors.New("저장할 색이 없습니다")
+		return nil, i18n.Errorf("err.gui.no_colors")
 	}
 	if len(colors) > processor.MaxExtractColors {
-		return nil, fmt.Errorf("색이 너무 많습니다 (%d개, 최대 %d개)", len(colors), processor.MaxExtractColors)
+		return nil, i18n.Errorf("err.gui.too_many_colors", len(colors), processor.MaxExtractColors)
 	}
 	dst := image.NewNRGBA(image.Rect(0, 0, len(colors), 1))
 	for i, s := range colors {
 		t := strings.TrimPrefix(strings.TrimSpace(s), "#")
 		if len(t) != 6 {
-			return nil, fmt.Errorf("잘못된 색입니다: %q", s)
+			return nil, i18n.Errorf("err.gui.bad_color", s)
 		}
 		var r, g, b uint8
 		if _, err := fmt.Sscanf(t, "%02x%02x%02x", &r, &g, &b); err != nil {
-			return nil, fmt.Errorf("잘못된 색입니다: %q", s)
+			return nil, i18n.Errorf("err.gui.bad_color", s)
 		}
 		copy(dst.Pix[i*4:], []uint8{r, g, b, 255})
 	}

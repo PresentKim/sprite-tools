@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"sprite-tools/pkg/common"
+	"sprite-tools/pkg/i18n"
 )
 
 // isFrameEmpty: rect 영역(img 좌표계)의 알파가 모두 0 인지 확인합니다.
@@ -43,10 +44,10 @@ type Frame struct {
 func SliceImage(src image.Image, frameW, frameH int, keepEmpty bool) ([]Frame, string, error) {
 	bounds := src.Bounds()
 	if bounds.Dx() == frameW && bounds.Dy() == frameH {
-		return nil, "", common.Skip("이미 프레임 크기 %dx%d", frameW, frameH)
+		return nil, "", common.Skip("skip.slice.same_size", frameW, frameH)
 	}
 	if bounds.Dx() < frameW || bounds.Dy() < frameH {
-		return nil, "", common.Skip("이미지 %dx%d 가 프레임 %dx%d 보다 작음", bounds.Dx(), bounds.Dy(), frameW, frameH)
+		return nil, "", common.Skip("skip.slice.smaller", bounds.Dx(), bounds.Dy(), frameW, frameH)
 	}
 
 	n := common.ToNRGBA(src)
@@ -64,12 +65,12 @@ func SliceImage(src image.Image, frameW, frameH int, keepEmpty bool) ([]Frame, s
 		}
 	}
 
-	msg := fmt.Sprintf("%d프레임, %dx%d 격자", len(frames), cols, rows)
+	msg := i18n.T("msg.slice.result", len(frames), cols, rows)
 	if empty > 0 {
-		msg += fmt.Sprintf(", 빈 프레임 %d개 제외", empty)
+		msg += i18n.T("msg.slice.empty", empty)
 	}
 	if bounds.Dx()%frameW != 0 || bounds.Dy()%frameH != 0 {
-		msg += fmt.Sprintf(", 경고: 가장자리 %dx%dpx 잘림", bounds.Dx()%frameW, bounds.Dy()%frameH)
+		msg += i18n.T("msg.slice.clipped", bounds.Dx()%frameW, bounds.Dy()%frameH)
 	}
 	return frames, msg, nil
 }

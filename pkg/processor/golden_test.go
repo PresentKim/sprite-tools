@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"sprite-tools/pkg/common"
+	"sprite-tools/pkg/i18n"
 )
 
 // 이 파일은 성능 개선(리팩터링) 전후로 결과가 바이트 단위로 같은지 확인하는 회귀 테스트입니다.
@@ -198,7 +199,12 @@ func goldenResults() map[string]string {
 	return got
 }
 
+// TestGolden: 픽셀 해시와 메시지가 함께 기록된 기대값을 한국어로 비교합니다.
+// 기대값은 i18n 도입 이전에 기록한 그대로이며, 한국어 카탈로그가 예전 문구를 정확히 재현해야 통과합니다.
 func TestGolden(t *testing.T) {
+	if err := i18n.SetLanguage("ko"); err != nil {
+		t.Fatal(err)
+	}
 	got := goldenResults()
 	for k, v := range got {
 		want, ok := goldenWant[k]

@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"sprite-tools/pkg/common"
+	"sprite-tools/pkg/i18n"
 	"sprite-tools/pkg/processor"
 )
 
@@ -27,91 +28,28 @@ type command struct {
 	name    string
 	aliases []string // 짧은 별칭
 	legacy  []string // 이전 이름 (호환용, 도움말에는 표시하지 않음)
-	summary string
-	usage   string // 인자 형식
-	details string // 설명 및 예시
 	run     func(args []string) int
 }
+
+// 명령 설명은 i18n 카탈로그(cmd.<이름>.summary / usage / details)에 있으며, 호출 시점의 언어로 읽습니다.
+func (c *command) summary() string { return i18n.T("cmd." + c.name + ".summary") } // 한 줄 설명
+func (c *command) usage() string   { return i18n.T("cmd." + c.name + ".usage") }   // 인자 형식
+func (c *command) details() string { return i18n.T("cmd." + c.name + ".details") } // 설명 및 예시
 
 var commands []command
 
 func init() {
 	commands = []command{
-		{"reduce", []string{"rd"}, []string{"simplify"}, "비슷한 색상을 합쳐 색상 수를 줄입니다 (OKLab 기준)", "[경로...] [옵션]",
-			`많이 쓰인 색상부터 대표 색상으로 잡고, 거리가 -t 미만인 색상을 대표 색상으로 합칩니다.
--k 로 최대 색상 수를 주면 그 수 이하가 되는 가장 약한 기준을 자동으로 찾습니다(-t 무시).
-
-예시:
-  sprite-tools reduce                        현재 폴더의 *.png → *-reduced.png
-  sprite-tools rd hero.png -t 0.08           더 과감하게 합치기
-  sprite-tools rd hero.png -k 16             색상을 16개 이하로 줄이기
-  sprite-tools rd assets -r -w               assets 하위 전체를 원본에 덮어쓰기`, runReduce},
-		{"recolor", []string{"rc"}, []string{"palette-convert"}, "Lospec 팔레트(또는 PNG 팔레트)의 색으로 바꿉니다", "-p <팔레트> [경로...] [옵션]",
-			`-p 에는 Lospec 팔레트 이름(예: otterisk-96) 또는 팔레트 PNG 파일 경로를 줍니다.
-받은 팔레트는 사용자 폴더(%APPDATA%\sprite-tools\palettes)에 저장되어 GUI와 함께 오프라인으로 쓸 수 있습니다.
-
-예시:
-  sprite-tools recolor -p otterisk-96
-  sprite-tools rc -p my-palette.png hero.png
-  sprite-tools rc -list`, runRecolor},
-		{"index", []string{"ix"}, []string{"palette"}, "인덱스(팔레트) PNG로 변환하고 0번 색을 투명(#ffffff00)으로 맞춥니다", "[경로...] [옵션]",
-			`색상 순서는 이미지에 처음 등장한 순서이며, 255색을 넘으면 실패합니다.
-
-예시:
-  sprite-tools index -w
-  sprite-tools ix sprites -r`, runIndex},
-		{"extract", []string{"ex"}, nil, "이미지의 색상을 팔레트 PNG(색 1개 = 1px, 한 줄)로 추출합니다", "[경로...] [옵션]",
-			`많이 쓰인 색상 순서(동률이면 먼저 등장한 순서)로 저장하며, 완전 투명한 픽셀은 무시하고 알파는 255로 맞춥니다.
-256색을 넘으면 실패하므로 먼저 reduce 로 줄이세요. 기본 출력은 <이름>-palette.png 입니다.
--save <이름> 을 주면 공용 팔레트 폴더에도 저장되어 'recolor -p <이름>' 으로 바로 쓸 수 있습니다
-(같은 이름이 있으면 -force 가 있어야 덮어씁니다. 파일이 하나일 때만 사용 가능).
-
-예시:
-  sprite-tools extract hero.png
-  sprite-tools ex hero.png -save hero-colors
-  sprite-tools rc -p hero-colors enemy.png`, runExtract},
-		{"downscale", []string{"ds"}, nil, "확대된 픽셀 아트를 1:1 크기로 줄입니다", "[경로...] [옵션]",
-			`같은 색이 이어지는 길이로 확대 배율을 자동 감지합니다. -scale 로 직접 지정할 수 있습니다.
-
-예시:
-  sprite-tools downscale big.png
-  sprite-tools ds -scale 4 -w`, runDownscale},
-		{"upscale", []string{"us"}, nil, "정수 배율로 최근접 확대합니다 (2~32배)", "[경로...] [옵션]",
-			`보간 없이 픽셀을 그대로 키웁니다. -scale 로 배율을 지정합니다(기본 2).
-
-예시:
-  sprite-tools upscale hero.png -scale 4
-  sprite-tools us sprites -r -scale 8 -o big`, runUpscale},
-		{"trim", []string{"tr"}, nil, "투명한 바깥 여백을 잘라냅니다", "[경로...] [옵션]",
-			`투명하지 않은 픽셀을 모두 감싸는 최소 사각형으로 자르고, -pad 로 사방에 투명 여백을 더합니다.
-완전히 투명한 이미지와 바뀌는 것이 없는 이미지는 건너뜁니다.
-
-예시:
-  sprite-tools trim icon.png
-  sprite-tools tr sprites -r -pad 1 -w`, runTrim},
-		{"despeckle", []string{"dsp"}, nil, "떨어져 있는 작은 조각(얼룩)을 투명하게 지웁니다", "[경로...] [옵션]",
-			`투명하지 않은 픽셀이 이어진 덩어리 가운데 픽셀 수가 -min 보다 작은 것을 완전 투명으로 지웁니다.
--diagonal(기본 켜짐)이면 대각선으로 닿은 픽셀도 한 덩어리로 보고, -diagonal=false 면 상하좌우로 닿은 것만 한 덩어리입니다.
-지울 조각이 없는 이미지는 건너뜁니다. 주의: 'ds' 는 downscale 의 별칭이고 despeckle 은 'dsp' 또는 'despeckle' 입니다.
-
-예시:
-  sprite-tools despeckle hero.png
-  sprite-tools dsp sprites -r -min 8 -w -backup
-  sprite-tools dsp icon.png -diagonal=false -min 2`, runDespeckle},
-		{"slice", []string{"sl"}, []string{"split"}, "스프라이트 시트를 프레임 단위로 자릅니다", "[경로...] [옵션]",
-			`<이름>-0001.png, <이름>-0002.png ... 로 저장합니다. 완전히 투명한 프레임은 건너뜁니다.
-
-예시:
-  sprite-tools slice sheet.png -size 32
-  sprite-tools sl sheet.png -size 16x24 -o frames`, runSlice},
-		{"pack", []string{"pk"}, nil, "여러 이미지를 한 장의 스프라이트 시트로 합칩니다 (slice 의 반대)", "-o <시트.png> [경로...] [옵션]",
-			`입력을 자연 정렬 순서(frame-2 가 frame-10 보다 앞)로 모두 합쳐 하나의 PNG 로 저장합니다.
-칸 크기는 가장 큰 너비 x 가장 큰 높이이고, 작은 이미지는 칸의 왼쪽 위(-align center 면 가운데)에 놓입니다.
--cols 0 이면 개수의 제곱근을 올림한 열 수를 씁니다. 입력 파일은 덮어쓸 수 없고, 이미 있는 출력 파일은 -force 가 있어야 덮어씁니다.
-
-예시:
-  sprite-tools pack frames -o sheet.png
-  sprite-tools pk frames -cols 4 -gap 1 -align center -o sheet.png`, runPack},
+		{"reduce", []string{"rd"}, []string{"simplify"}, runReduce},
+		{"recolor", []string{"rc"}, []string{"palette-convert"}, runRecolor},
+		{"index", []string{"ix"}, []string{"palette"}, runIndex},
+		{"extract", []string{"ex"}, nil, runExtract},
+		{"downscale", []string{"ds"}, nil, runDownscale},
+		{"upscale", []string{"us"}, nil, runUpscale},
+		{"trim", []string{"tr"}, nil, runTrim},
+		{"despeckle", []string{"dsp"}, nil, runDespeckle},
+		{"slice", []string{"sl"}, []string{"split"}, runSlice},
+		{"pack", []string{"pk"}, nil, runPack},
 	}
 }
 
@@ -119,7 +57,73 @@ func main() {
 	os.Exit(run(os.Args[1:]))
 }
 
+// langEnv: 표시 언어를 지정하는 환경 변수입니다 (--lang 이 우선합니다).
+const langEnv = "SPRITE_TOOLS_LANG"
+
+// langList: "en, ko" 처럼 사용할 수 있는 언어 코드 목록 문자열입니다. (언어 이름은 각 언어 그대로라 영어 출력에 한글이 섞이지 않도록 코드만 보여 줍니다)
+func langList() string {
+	var codes []string
+	for _, l := range i18n.Languages() {
+		codes = append(codes, l.Code)
+	}
+	return strings.Join(codes, ", ")
+}
+
+// extractLang: 명령 이름 앞뒤 어디에 있든 --lang <코드> / -lang <코드> / --lang=<코드> 를 인자에서 빼냅니다. "--" 이후는 건드리지 않습니다.
+func extractLang(args []string) (rest []string, lang string, given bool, err error) {
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		if a == "--" {
+			rest = append(rest, args[i:]...)
+			break
+		}
+		name, value, hasValue := strings.Cut(a, "=")
+		if name != "-lang" && name != "--lang" {
+			rest = append(rest, a)
+			continue
+		}
+		if !hasValue {
+			if i+1 >= len(args) {
+				return nil, "", false, i18n.Errorf("cli.lang.missing", langList())
+			}
+			i++
+			value = args[i]
+		}
+		lang, given = value, true
+	}
+	return rest, lang, given, nil
+}
+
+// setupLanguage: 언어를 --lang > SPRITE_TOOLS_LANG > 기본값(en) 순서로 정하고, 플래그를 뺀 인자를 돌려줍니다.
+// 플래그 도움말은 플래그를 만들 때 문자열로 고정되므로, 반드시 플래그 세트를 만들기 전에 호출해야 합니다.
+func setupLanguage(args []string) ([]string, error) {
+	_ = i18n.SetLanguage(i18n.DefaultLanguage)
+	rest, lang, given, err := extractLang(args)
+	if err != nil {
+		return nil, err
+	}
+	if given {
+		if err := i18n.SetLanguage(lang); err != nil {
+			return nil, i18n.Errorf("cli.lang.invalid", lang, langList())
+		}
+	} else if env := strings.TrimSpace(os.Getenv(langEnv)); env != "" {
+		if err := i18n.SetLanguage(env); err != nil {
+			fmt.Fprintln(os.Stderr, i18n.T("cli.lang.env_invalid", env, langList()))
+		}
+	}
+	return rest, nil
+}
+
+func printError(err error) {
+	fmt.Fprintln(os.Stderr, i18n.T("cli.error", err))
+}
+
 func run(args []string) int {
+	args, err := setupLanguage(args)
+	if err != nil {
+		printError(err)
+		return exitUsage
+	}
 	if len(args) == 0 {
 		printHelp()
 		return exitUsage
@@ -137,17 +141,17 @@ func run(args []string) int {
 	}
 	cmd, candidates := resolveCommand(name)
 	if cmd == nil {
-		fmt.Fprintf(os.Stderr, "알 수 없는 명령: %s\n", name)
+		fmt.Fprintln(os.Stderr, i18n.T("cli.unknown_command", name))
 		if len(candidates) > 1 {
-			fmt.Fprintf(os.Stderr, "여러 명령과 겹칩니다: %s\n", strings.Join(candidates, ", "))
+			fmt.Fprintln(os.Stderr, i18n.T("cli.ambiguous", strings.Join(candidates, ", ")))
 		} else if s := suggest(name); s != "" {
-			fmt.Fprintf(os.Stderr, "혹시 '%s' 를 찾으셨나요?\n", s)
+			fmt.Fprintln(os.Stderr, i18n.T("cli.suggest", s))
 		}
-		fmt.Fprintf(os.Stderr, "'%s help' 로 명령 목록을 확인하세요.\n", programName)
+		fmt.Fprintln(os.Stderr, i18n.T("cli.see_help", programName))
 		return exitUsage
 	}
 	if slices.Contains(cmd.legacy, strings.ToLower(name)) {
-		fmt.Fprintf(os.Stderr, "참고: '%s' 는 '%s' 로 이름이 바뀌었습니다.\n", name, cmd.name)
+		fmt.Fprintln(os.Stderr, i18n.T("cli.renamed", name, cmd.name))
 	}
 	return cmd.run(args[1:])
 }
@@ -213,23 +217,26 @@ func levenshtein(a, b string) int {
 }
 
 func printHelp() {
-	fmt.Println("Sprite Tools - 픽셀 아트 명령줄 도구")
+	fmt.Println(i18n.T("cli.help.title"))
 	fmt.Println()
-	fmt.Printf("사용법:\n  %s <명령> [경로...] [옵션]\n\n", programName)
-	fmt.Println("명령:       별칭")
+	fmt.Println(i18n.T("cli.usage"))
+	fmt.Println("  " + i18n.T("cli.help.usage_line", programName))
+	fmt.Println()
+	fmt.Println(i18n.T("cli.help.commands"))
 	for _, c := range commands {
-		fmt.Printf("  %-10s %-5s %s\n", c.name, strings.Join(c.aliases, ","), c.summary)
+		fmt.Printf("  %-10s %-5s %s\n", c.name, strings.Join(c.aliases, ","), c.summary())
 	}
 	fmt.Println()
-	fmt.Println("공통 동작:")
-	fmt.Println("  - 경로를 생략하면 현재 폴더의 PNG를 처리합니다. 파일과 폴더를 여러 개 줄 수 있습니다.")
-	fmt.Println("  - 기본적으로 원본은 그대로 두고 접미사(-s)가 붙은 새 파일로 저장합니다. 덮어쓰려면 -w.")
-	fmt.Println("  - -w 와 -backup 을 함께 쓰면 덮어쓰기 전에 원본을 <파일 폴더>/" + common.BackupDirName + "/<실행 시각>/ 에 복사해 둡니다.")
-	fmt.Println("  - -o <폴더> 로 다른 폴더에 저장할 수 있습니다 (하위 폴더 구조 유지, -w 와는 함께 쓸 수 없음).")
-	fmt.Println("  - -n 으로 실제 처리 없이 대상 파일만 미리 볼 수 있습니다.")
-	fmt.Println("  - 명령은 별칭이나 겹치지 않는 앞부분으로 줄여 쓸 수 있습니다 (예: rd, red, de).")
+	fmt.Println(i18n.T("cli.help.common_title"))
+	fmt.Println("  - " + i18n.T("cli.help.common.paths"))
+	fmt.Println("  - " + i18n.T("cli.help.common.suffix"))
+	fmt.Println("  - " + i18n.T("cli.help.common.backup", common.BackupDirName))
+	fmt.Println("  - " + i18n.T("cli.help.common.outdir"))
+	fmt.Println("  - " + i18n.T("cli.help.common.dryrun"))
+	fmt.Println("  - " + i18n.T("cli.help.common.abbrev"))
+	fmt.Println("  - " + i18n.T("cli.help.common.lang", langList()))
 	fmt.Println()
-	fmt.Printf("자세한 옵션: %s help <명령>\n", programName)
+	fmt.Println(i18n.T("cli.help.more", programName))
 }
 
 func newFlagSet(name string) (*flag.FlagSet, *command) {
@@ -237,13 +244,13 @@ func newFlagSet(name string) (*flag.FlagSet, *command) {
 	fs := flag.NewFlagSet(name, flag.ContinueOnError)
 	fs.Usage = func() {
 		out := fs.Output()
-		fmt.Fprintf(out, "%s\n\n사용법:\n  %s %s %s\n", cmd.summary, programName, name, cmd.usage)
+		fmt.Fprintf(out, "%s\n\n%s\n  %s %s %s\n", cmd.summary(), i18n.T("cli.usage"), programName, name, cmd.usage())
 		if len(cmd.aliases) > 0 {
-			fmt.Fprintf(out, "  (별칭: %s)\n", strings.Join(cmd.aliases, ", "))
+			fmt.Fprintf(out, "  %s\n", i18n.T("cli.cmd.aliases", strings.Join(cmd.aliases, ", ")))
 		}
-		fmt.Fprintf(out, "\n옵션:\n")
+		fmt.Fprintf(out, "\n%s\n", i18n.T("cli.cmd.options"))
 		fs.PrintDefaults()
-		fmt.Fprintf(out, "\n%s\n", cmd.details)
+		fmt.Fprintf(out, "\n%s\n", cmd.details())
 	}
 	return fs, cmd
 }
@@ -271,17 +278,17 @@ const (
 
 func addBatchFlags(fs *flag.FlagSet, defaultSuffix string, mode outputMode) *batchFlags {
 	b := &batchFlags{
-		pattern:   fs.String("i", "*.png", "폴더 탐색 시 파일 이름 패턴"),
-		recursive: fs.Bool("r", false, "하위 폴더까지 탐색"),
-		threads:   fs.Int("j", 0, "동시 처리 스레드 수 (0 = CPU 코어 수)"),
-		dryRun:    fs.Bool("n", false, "실제로 처리하지 않고 대상 파일만 표시"),
+		pattern:   fs.String("i", "*.png", i18n.T("flag.pattern")),
+		recursive: fs.Bool("r", false, i18n.T("flag.recursive")),
+		threads:   fs.Int("j", 0, i18n.T("flag.threads")),
+		dryRun:    fs.Bool("n", false, i18n.T("flag.dryrun")),
 	}
 	if mode != modeNoOutput {
-		b.suffix = fs.String("s", defaultSuffix, "출력 파일 접미사 (-o 와 함께 쓸 때는 비워도 됨)")
-		b.outDir = fs.String("o", "", "결과를 저장할 폴더 (하위 폴더 구조 유지, 없으면 만듦)")
+		b.suffix = fs.String("s", defaultSuffix, i18n.T("flag.suffix"))
+		b.outDir = fs.String("o", "", i18n.T("flag.outdir"))
 		if mode == modeOutput {
-			b.inPlace = fs.Bool("w", false, "새 파일 대신 원본을 덮어쓰기")
-			b.backup = fs.Bool("backup", false, "-w 로 덮어쓰기 전에 원본을 <파일 폴더>/"+common.BackupDirName+"/<실행 시각>/ 에 복사 (-w 와 함께 쓰기를 권장)")
+			b.inPlace = fs.Bool("w", false, i18n.T("flag.inplace"))
+			b.backup = fs.Bool("backup", false, i18n.T("flag.backup", common.BackupDirName))
 		}
 	}
 	return b
@@ -338,23 +345,23 @@ func parseOrExit(fs *flag.FlagSet, args []string) ([]string, int, bool) {
 func execute(b *batchFlags, roots []string, task common.Task) int {
 	o := b.options(roots)
 	if err := o.Validate(); err != nil {
-		fmt.Fprintf(os.Stderr, "오류: %v\n", err)
+		printError(err)
 		return exitUsage
 	}
 	files, err := common.CollectInputs(o)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "오류: %v\n", err)
+		printError(err)
 		return exitUsage
 	}
 	if len(files) == 0 {
-		fmt.Printf("처리할 파일이 없습니다 (패턴: %s)\n", o.Pattern)
+		fmt.Println(i18n.T("cli.no_files", o.Pattern))
 		return exitOK
 	}
 
 	if *b.dryRun {
-		fmt.Printf("[미리보기] %d개 파일이 처리됩니다. 실제로는 아무것도 쓰지 않습니다.\n", len(files))
+		fmt.Println(i18n.T("cli.dryrun.header", len(files)))
 		if o.Backup {
-			fmt.Printf("  (덮어쓰기 전에 원본을 %s 에 백업합니다)\n", common.BackupDirName)
+			fmt.Println(i18n.T("cli.dryrun.backup", common.BackupDirName))
 		}
 		failed := 0
 		for i, plan := range o.PlanOutputs(files) {
@@ -362,11 +369,11 @@ func execute(b *batchFlags, roots []string, task common.Task) int {
 			switch {
 			case plan.Err != nil:
 				failed++
-				fmt.Printf("  %s -> %s  (실패 예정: %v)\n", f, out, plan.Err)
+				fmt.Println(i18n.T("cli.dryrun.will_fail", f, out, plan.Err))
 			case out == "":
 				fmt.Printf("  %s\n", f)
 			case out == f:
-				fmt.Printf("  %s (덮어쓰기)\n", f)
+				fmt.Println(i18n.T("cli.dryrun.overwrite", f))
 			default:
 				fmt.Printf("  %s -> %s\n", f, out)
 			}
@@ -381,12 +388,12 @@ func execute(b *batchFlags, roots []string, task common.Task) int {
 	if threads <= 0 {
 		threads = runtime.NumCPU()
 	}
-	fmt.Printf("%d개 파일 처리 시작 (스레드 %d개)\n", len(files), min(threads, len(files)))
+	fmt.Println(i18n.T("cli.run.start", len(files), min(threads, len(files))))
 
 	labels := map[common.Status]string{
-		common.StatusDone:    "완료  ",
-		common.StatusSkipped: "건너뜀",
-		common.StatusFailed:  "실패  ",
+		common.StatusDone:    i18n.T("cli.run.label.done"),
+		common.StatusSkipped: i18n.T("cli.run.label.skipped"),
+		common.StatusFailed:  i18n.T("cli.run.label.failed"),
 	}
 	width := len(fmt.Sprint(len(files)))
 	sum := common.RunInputs(context.Background(), files, o, task, func(r common.Result) {
@@ -405,12 +412,13 @@ func execute(b *batchFlags, roots []string, task common.Task) int {
 		fmt.Printf("[%*d/%d] %s %s%s\n", width, r.Completed, r.Total, labels[r.Status], target, msg)
 	})
 
-	fmt.Printf("\n완료 %d · 건너뜀 %d · 실패 %d  (%.1fs)\n", sum.Done, sum.Skipped, sum.Failed, sum.Elapsed.Seconds())
+	fmt.Println()
+	fmt.Println(i18n.T("cli.run.summary", sum.Done, sum.Skipped, sum.Failed, sum.Elapsed.Seconds()))
 	if sum.Backups > 0 {
-		fmt.Printf("원본 %d개를 백업했습니다:\n", sum.Backups)
+		fmt.Println(i18n.T("cli.backup.summary", sum.Backups))
 		for i, d := range sum.BackupDirs {
 			if i == 5 {
-				fmt.Printf("  … 외 %d곳\n", len(sum.BackupDirs)-i)
+				fmt.Println(i18n.T("cli.backup.more", len(sum.BackupDirs)-i))
 				break
 			}
 			fmt.Printf("  %s\n", d)
@@ -422,23 +430,24 @@ func execute(b *batchFlags, roots []string, task common.Task) int {
 	return exitOK
 }
 
-func usageError(fs *flag.FlagSet, format string, a ...any) int {
-	fmt.Fprintf(os.Stderr, "오류: "+format+"\n\n", a...)
+// usageError: 카탈로그 키(err.cli.*)로 만든 오류와 함께 사용법을 보여 줍니다.
+func usageError(fs *flag.FlagSet, key string, a ...any) int {
+	fmt.Fprintf(os.Stderr, "%s\n\n", i18n.T("cli.error", i18n.T(key, a...)))
 	fs.Usage()
 	return exitUsage
 }
 
 func runReduce(args []string) int {
 	fs, _ := newFlagSet("reduce")
-	threshold := fs.Float64("t", 0.05, "색상 병합 기준 거리 (클수록 더 많이 합침, 권장 0.02~0.15)")
-	maxColors := fs.Int("k", 0, "최대 색상 수 (0 = 사용 안 함, 지정하면 -t 대신 이 수 이하가 되도록 자동 조절)")
+	threshold := fs.Float64("t", 0.05, i18n.T("flag.threshold"))
+	maxColors := fs.Int("k", 0, i18n.T("flag.max_colors"))
 	b := addBatchFlags(fs, "-reduced", modeOutput)
 	roots, code, ok := parseOrExit(fs, args)
 	if !ok {
 		return code
 	}
 	if *maxColors < 0 {
-		return usageError(fs, "-k 는 0 이상이어야 합니다")
+		return usageError(fs, "err.cli.k_negative")
 	}
 	if *maxColors > 0 {
 		return execute(b, roots, func(in, out string) (string, error) {
@@ -446,7 +455,7 @@ func runReduce(args []string) int {
 		})
 	}
 	if *threshold <= 0 {
-		return usageError(fs, "-t 는 0보다 커야 합니다")
+		return usageError(fs, "err.cli.t_positive")
 	}
 	return execute(b, roots, func(in, out string) (string, error) {
 		return processor.Reduce(in, out, *threshold)
@@ -455,14 +464,14 @@ func runReduce(args []string) int {
 
 func runDownscale(args []string) int {
 	fs, _ := newFlagSet("downscale")
-	scale := fs.Int("scale", 0, "축소 배율 직접 지정 (0 = 자동 감지)")
+	scale := fs.Int("scale", 0, i18n.T("flag.scale_down"))
 	b := addBatchFlags(fs, "-downscaled", modeOutput)
 	roots, code, ok := parseOrExit(fs, args)
 	if !ok {
 		return code
 	}
 	if *scale < 0 || *scale == 1 {
-		return usageError(fs, "-scale 은 2 이상이거나 0(자동)이어야 합니다")
+		return usageError(fs, "err.cli.scale_down")
 	}
 	return execute(b, roots, func(in, out string) (string, error) {
 		return processor.Downscale(in, out, *scale)
@@ -483,29 +492,29 @@ func runIndex(args []string) int {
 func parseSize(s string) (int, int, error) {
 	parts := strings.Split(strings.ToLower(s), "x")
 	if len(parts) > 2 {
-		return 0, 0, fmt.Errorf("형식이 잘못됨")
+		return 0, 0, i18n.Errorf("err.cli.size_format")
 	}
 	w, err := strconv.Atoi(strings.TrimSpace(parts[0]))
 	if err != nil {
-		return 0, 0, fmt.Errorf("형식이 잘못됨")
+		return 0, 0, i18n.Errorf("err.cli.size_format")
 	}
 	h := w
 	if len(parts) == 2 {
 		if h, err = strconv.Atoi(strings.TrimSpace(parts[1])); err != nil {
-			return 0, 0, fmt.Errorf("형식이 잘못됨")
+			return 0, 0, i18n.Errorf("err.cli.size_format")
 		}
 	}
 	if w <= 0 || h <= 0 {
-		return 0, 0, fmt.Errorf("0보다 커야 함")
+		return 0, 0, i18n.Errorf("err.cli.size_positive")
 	}
 	return w, h, nil
 }
 
 func runSlice(args []string) int {
 	fs, _ := newFlagSet("slice")
-	size := fs.String("size", "16", "프레임 크기 (예: 16 또는 16x24)")
-	outDir := fs.String("o", "", "프레임을 저장할 폴더 (기본: 원본과 같은 폴더)")
-	keepEmpty := fs.Bool("keep-empty", false, "완전히 투명한 프레임도 저장")
+	size := fs.String("size", "16", i18n.T("flag.frame_size"))
+	outDir := fs.String("o", "", i18n.T("flag.slice_outdir"))
+	keepEmpty := fs.Bool("keep-empty", false, i18n.T("flag.keep_empty"))
 	b := addBatchFlags(fs, "", modeNoOutput)
 	roots, code, ok := parseOrExit(fs, args)
 	if !ok {
@@ -513,7 +522,7 @@ func runSlice(args []string) int {
 	}
 	w, h, err := parseSize(*size)
 	if err != nil {
-		return usageError(fs, "-size '%s': %v", *size, err)
+		return usageError(fs, "err.cli.size", *size, err)
 	}
 	return execute(b, roots, func(in, _ string) (string, error) {
 		return processor.SliceFile(in, w, h, *outDir, *keepEmpty)
@@ -522,8 +531,8 @@ func runSlice(args []string) int {
 
 func runRecolor(args []string) int {
 	fs, _ := newFlagSet("recolor")
-	paletteSpec := fs.String("p", "", "Lospec 팔레트 이름 또는 팔레트 PNG 경로 (예: otterisk-96)")
-	list := fs.Bool("list", false, "다운로드된 로컬 팔레트 목록 표시")
+	paletteSpec := fs.String("p", "", i18n.T("flag.palette"))
+	list := fs.Bool("list", false, i18n.T("flag.list"))
 	b := addBatchFlags(fs, "-recolored", modeOutput)
 	roots, code, ok := parseOrExit(fs, args)
 	if !ok {
@@ -533,12 +542,12 @@ func runRecolor(args []string) int {
 	if *list {
 		palettes, err := processor.ListLocalPalettes()
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "팔레트 목록 조회 실패: %v\n", err)
+			fmt.Fprintln(os.Stderr, i18n.T("cli.palette.list_failed", err))
 			return exitFailed
 		}
-		fmt.Printf("로컬 팔레트 (%s)\n", strings.Join(processor.PaletteDirs(), ", "))
+		fmt.Println(i18n.T("cli.palette.local", strings.Join(processor.PaletteDirs(), ", ")))
 		if len(palettes) == 0 {
-			fmt.Println("  (없음) -p <이름> 으로 처음 사용할 때 자동으로 다운로드됩니다.")
+			fmt.Println(i18n.T("cli.palette.none"))
 		}
 		for _, p := range palettes {
 			fmt.Printf("  - %s\n", p)
@@ -547,20 +556,20 @@ func runRecolor(args []string) int {
 	}
 
 	if *paletteSpec == "" {
-		return usageError(fs, "팔레트(-p)를 지정해야 합니다. 예: -p otterisk-96")
+		return usageError(fs, "err.cli.palette_required")
 	}
 
 	palettePath, err := processor.ResolvePalette(*paletteSpec)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "오류: %v\n", err)
+		printError(err)
 		return exitFailed
 	}
 	rawColors, labColors, err := processor.LoadPaletteColors(palettePath)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "오류: %v\n", err)
+		printError(err)
 		return exitFailed
 	}
-	fmt.Printf("팔레트 %s (%d색)\n", palettePath, len(rawColors))
+	fmt.Println(i18n.T("cli.palette.using", palettePath, len(rawColors)))
 
 	return execute(b, roots, func(in, out string) (string, error) {
 		return processor.Recolor(in, out, rawColors, labColors)

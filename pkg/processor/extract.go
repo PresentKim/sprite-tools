@@ -1,7 +1,6 @@
 package processor
 
 import (
-	"fmt"
 	"image"
 	"os"
 	"path/filepath"
@@ -9,6 +8,7 @@ import (
 	"strings"
 
 	"sprite-tools/pkg/common"
+	"sprite-tools/pkg/i18n"
 )
 
 // MaxExtractColors: 추출할 수 있는 최대 색상 수 (Lospec 팔레트 PNG 관례).
@@ -46,10 +46,10 @@ func ExtractPaletteImage(src image.Image) (image.Image, string, error) {
 	}
 
 	if len(keys) == 0 {
-		return nil, "", common.Skip("불투명 색상이 없음")
+		return nil, "", common.Skip("skip.extract.no_colors")
 	}
 	if len(keys) > MaxExtractColors {
-		return nil, "", fmt.Errorf("색상이 %d개라 팔레트로 만들 수 없습니다(최대 %d개). 먼저 reduce 로 색상을 줄이세요", len(keys), MaxExtractColors)
+		return nil, "", i18n.Errorf("err.extract.too_many_colors", len(keys), MaxExtractColors)
 	}
 
 	order := make([]int, len(keys))
@@ -63,14 +63,14 @@ func ExtractPaletteImage(src image.Image) (image.Image, string, error) {
 		r, g, b, a := common.UnpackNRGBA(keys[i])
 		copy(dst.Pix[x*4:], []uint8{r, g, b, a})
 	}
-	return dst, fmt.Sprintf("색상 %d개 추출", len(keys)), nil
+	return dst, i18n.T("msg.extract.result", len(keys)), nil
 }
 
 // NormalizePaletteName: 팔레트 이름을 소문자로 바꾸고 Lospec 이름 규칙(영문 소문자, 숫자, '-')을 검사합니다.
 func NormalizePaletteName(name string) (string, error) {
 	clean := strings.ToLower(strings.TrimSpace(name))
 	if !paletteNamePattern.MatchString(clean) {
-		return "", fmt.Errorf("잘못된 팔레트 이름입니다: '%s' (영문 소문자, 숫자, '-'만 사용, 예: my-palette)", name)
+		return "", i18n.Errorf("err.palette.name_invalid", name)
 	}
 	return clean, nil
 }
@@ -85,7 +85,7 @@ func SavePalette(name string, palette image.Image, force bool) (string, error) {
 	if !force {
 		for _, dir := range PaletteDirs() {
 			if _, err := os.Stat(filepath.Join(dir, clean+".png")); err == nil {
-				return "", fmt.Errorf("이미 같은 이름의 팔레트가 있습니다: '%s' (덮어쓰려면 -force)", clean)
+				return "", i18n.Errorf("err.palette.exists", clean)
 			}
 		}
 	}
@@ -95,7 +95,7 @@ func SavePalette(name string, palette image.Image, force bool) (string, error) {
 	}
 	path := filepath.Join(dir, clean+".png")
 	if err := common.SavePNG(path, palette); err != nil {
-		return "", fmt.Errorf("팔레트 저장 실패: %v", err)
+		return "", i18n.Errorf("err.palette.save_failed", err)
 	}
 	return path, nil
 }
@@ -121,7 +121,7 @@ func Extract(inputPath, outputPath, saveName string, force bool) (string, error)
 		if err != nil {
 			return "", err
 		}
-		msg += fmt.Sprintf(", 팔레트 저장: %s", saved)
+		msg += i18n.T("msg.extract.saved", saved)
 	}
 	if err := common.SavePNG(outputPath, pal); err != nil {
 		return "", err
