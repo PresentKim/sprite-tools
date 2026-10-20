@@ -30,6 +30,10 @@ export function LoadPalette(arg1) {
   return window['go']['main']['App']['LoadPalette'](arg1);
 }
 
+export function PaletteExists(arg1) {
+  return window['go']['main']['App']['PaletteExists'](arg1);
+}
+
 export function PalettesDir() {
   return window['go']['main']['App']['PalettesDir']();
 }
@@ -54,6 +58,10 @@ export function PreviewPack(arg1, arg2) {
   return window['go']['main']['App']['PreviewPack'](arg1, arg2);
 }
 
+export function ProcessPixels(arg1, arg2, arg3, arg4) {
+  return window['go']['main']['App']['ProcessPixels'](arg1, arg2, arg3, arg4);
+}
+
 export function RestoreBackups(arg1) {
   return window['go']['main']['App']['RestoreBackups'](arg1);
 }
@@ -76,6 +84,10 @@ export function SaveImageAs(arg1, arg2, arg3, arg4, arg5, arg6) {
 
 export function SaveImageRGBA(arg1, arg2, arg3, arg4, arg5) {
   return window['go']['main']['App']['SaveImageRGBA'](arg1, arg2, arg3, arg4, arg5);
+}
+
+export function SavePaletteColors(arg1, arg2, arg3) {
+  return window['go']['main']['App']['SavePaletteColors'](arg1, arg2, arg3);
 }
 
 export function SetEditorDirty(arg1) {

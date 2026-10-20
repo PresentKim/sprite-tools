@@ -165,3 +165,53 @@ export function floodGlobal(px32, sx, sy, w, tol) {
   for (let i = 0; i < px32.length; i++) if (match(px32[i])) out.push(i);
   return out;
 }
+
+// ---------- 변형 ----------
+
+// 배열(w×h, 어떤 타입이든)을 뒤집거나 돌립니다. kind: flipH | flipV | cw | ccw | r180. 반환: { arr, w, h }
+export function transformPix(src, w, h, kind) {
+  const rot = kind === 'cw' || kind === 'ccw';
+  const nw = rot ? h : w, nh = rot ? w : h;
+  const dst = new src.constructor(w * h);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      let nx, ny;
+      switch (kind) {
+        case 'flipH': nx = w - 1 - x; ny = y; break;
+        case 'flipV': nx = x; ny = h - 1 - y; break;
+        case 'cw': nx = h - 1 - y; ny = x; break;
+        case 'ccw': nx = y; ny = w - 1 - x; break;
+        default: nx = w - 1 - x; ny = h - 1 - y; // r180
+      }
+      dst[ny * nw + nx] = src[y * w + x];
+    }
+  }
+  return { arr: dst, w: nw, h: nh };
+}
+
+// 알파가 0 이 아닌 픽셀의 경계 상자 { x0, y0, x1, y1 } (끝 칸 포함). 없으면 null
+export function opaqueBounds(px32, w, h) {
+  let x0 = w, y0 = h, x1 = -1, y1 = -1;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      if (px32[y * w + x] >>> 24 === 0) continue;
+      if (x < x0) x0 = x;
+      if (x > x1) x1 = x;
+      if (y < y0) y0 = y;
+      y1 = y;
+    }
+  }
+  return x1 < 0 ? null : { x0, y0, x1, y1 };
+}
+
+// src(sw×sh)의 (sx,sy)부터 nw×nh 만큼을 새 배열로 복사합니다. 범위 밖은 0 (투명)
+export function cropPix(src, sw, sh, sx, sy, nw, nh) {
+  const dst = new Uint32Array(nw * nh);
+  for (let y = 0; y < nh; y++) {
+    const gy = sy + y;
+    if (gy < 0 || gy >= sh) continue;
+    const a = Math.max(0, sx), b = Math.min(sw, sx + nw);
+    if (b > a) dst.set(src.subarray(gy * sw + a, gy * sw + b), y * nw + (a - sx));
+  }
+  return dst;
+}

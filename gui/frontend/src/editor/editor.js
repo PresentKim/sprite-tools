@@ -3,10 +3,14 @@
 // 그리기는 모두 "획(stroke)" 단위로 버퍼를 직접 고치면서 바뀐 픽셀의 이전 값을 기록하고,
 // 획이 끝나면 History 에 패치 하나로 넣습니다. 선·도형은 드래그하는 동안 되돌렸다 다시 그리며 미리 보여줍니다.
 import './editor.css';
-import { LoadImageRGBA, PickFiles, SaveImageAs, SaveImageRGBA } from '../../wailsjs/go/main/App';
-import { css, fromBase64, norm, pack, parseHex, toBase64, toHex, unpack } from './color.js';
+import {
+  ListPalettes, LoadImageRGBA, LoadPalette, PaletteExists, PickFiles, PickPaletteFile, ProcessPixels, SaveImageAs, SaveImageRGBA,
+  SavePaletteColors,
+} from '../../wailsjs/go/main/App';
+import { css, fromBase64, norm, over, pack, parseHex, toBase64, toHex, unpack } from './color.js';
 import { History } from './history.js';
-import { drawCursor, drawMain, drawNavigator } from './render.js';
+import { clearOverlay, drawAnts, drawCursor, drawMain, drawNavigator } from './render.js';
+import * as Sel from './selection.js';
 import * as T from './tools.js';
 import { el, isModalOpen, modal } from './ui.js';
 
@@ -28,6 +32,8 @@ const ICONS = {
   symy: '<path d="M1.8 8h12.4" stroke-dasharray="1.6 1.4"/><path d="M5 5.4L8 2.8l3 2.6M5 10.6l3 2.6 3-2.6"/>',
   grid: '<path d="M2.8 2.8h10.4v10.4H2.8zM2.8 8h10.4M8 2.8v10.4"/>',
   swap: '<path d="M3 6h9l-2.4-2.4M13 10H4l2.4 2.4"/>',
+  select: '<rect x="2.8" y="3.4" width="10.4" height="9.2" stroke-dasharray="2.2 1.6"/>',
+  move: '<path d="M8 1.8v12.4M1.8 8h12.4M6.2 3.6L8 1.8l1.8 1.8M6.2 12.4L8 14.2l1.8-1.8M3.6 6.2L1.8 8l1.8 1.8M12.4 6.2L14.2 8l-1.8 1.8"/>',
 };
 function icon(name) {
   const s = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -45,12 +51,16 @@ const TOOLS = [
   { id: 'line', label: '선', key: 'L', extra: 'Shift: 0/45/90° 고정' },
   { id: 'rect', label: '사각형', key: 'U', extra: 'Shift: 정사각형' },
   { id: 'ellipse', label: '타원', key: 'Shift+U', extra: 'Shift: 원' },
+  { id: 'select', label: '사각형 선택', key: 'M', extra: 'Shift: 더하기 · Alt: 빼기 · 선택 안쪽을 끌면 이동', group: 1 },
+  { id: 'move', label: '이동', key: 'V', extra: '선택 영역(없으면 전체)의 픽셀을 끌어 옮김 · 방향키: 1px, Shift+방향키: 10px', group: 1 },
 ];
+const SELECT_TOOLS = ['select', 'move'];
 
 const defaultPrefs = {
   tool: 'pencil', size: 1, shape: 'square', pixelPerfect: true, fillMode: 'contiguous', tolerance: 0,
   shapeFilled: false, symX: false, symY: false, grid: false, tile: 0,
   primary: pack(0, 0, 0, 255), secondary: pack(255, 255, 255, 255), recent: [],
+  adhoc: [], palSource: 'adhoc',
 };
 
 function loadPrefs() {
@@ -58,12 +68,15 @@ function loadPrefs() {
     const p = { ...defaultPrefs, ...JSON.parse(localStorage.getItem(PREF_KEY) || '{}') };
     if (!TOOLS.some((t) => t.id === p.tool)) p.tool = 'pencil';
     p.recent = Array.isArray(p.recent) ? p.recent.filter((c) => Number.isInteger(c)).slice(0, 16) : [];
+    p.adhoc = Array.isArray(p.adhoc) ? p.adhoc.filter((c) => Number.isInteger(c)).slice(0, 256) : [];
+    if (typeof p.palSource !== 'string') p.palSource = 'adhoc';
     return p;
   } catch {
     return { ...defaultPrefs };
   }
 }
 
+let clip = null; // 내부 클립보드: { w, h, pix: Uint32Array, mask: Uint8Array } — 문서가 바뀌어도 유지됩니다
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const sameFile = (a, b) => !!a && !!b && a.toLowerCase().replace(/\\/g, '/') === b.toLowerCase().replace(/\\/g, '/');
 const baseName = (p) => p.split(/[\\/]/).pop();
@@ -82,6 +95,8 @@ export function createEditor(host, hooks) {
     cur: null, // 진행 중인 획
     saving: false,
     pickerSlot: null,
+    float: null, // 떠 있는 층 (이동·붙여넣기 중): { x, y, w, h, pix, off, rec, origSel }
+    fx: null, // 진행 중인 효과 미리보기
   };
   const dpr = () => window.devicePixelRatio || 1;
   let savePrefsTimer = 0;
@@ -127,15 +142,20 @@ export function createEditor(host, hooks) {
     R.tile.title = '타일 격자 간격 (px)';
     TILES.forEach((t) => R.tile.append(new Option(t ? `타일 ${t}` : '타일 없음', t)));
     R.tile.onchange = () => { P.tile = Number(R.tile.value); savePrefs(); render(); R.tile.blur(); };
+    R.menuEdit = mkBtn('btn small ed-menubtn', '편집 ▾', '복사·붙여넣기·선택', (e) => toggleMenu(R.menuEdit, editMenu));
+    R.menuImage = mkBtn('btn small ed-menubtn', '이미지 ▾', '뒤집기·회전·캔버스 크기·자르기', () => toggleMenu(R.menuImage, imageMenu));
+    R.menuFx = mkBtn('btn small ed-menubtn', '효과 ▾', '일괄 처리 기능을 현재 이미지에 적용', () => toggleMenu(R.menuFx, fxMenu));
     top.append(R.name, R.dirty, el('span', 'spacer'), R.open, R.new, sep(), R.save, R.saveAs, sep(), R.undo, R.redo, sep(),
-      R.zoomOut, R.zoomLabel, R.zoomIn, R.fit, R.one, sep(), R.grid, R.tile);
+      R.menuEdit, R.menuImage, R.menuFx, sep(), R.zoomOut, R.zoomLabel, R.zoomIn, R.fit, R.one, sep(), R.grid, R.tile);
     return top;
   }
 
   function buildTools() {
     const bar = el('div', 'ed-tools');
     R.toolBtns = {};
+    let group = 0;
     for (const t of TOOLS) {
+      if ((t.group || 0) !== group) { group = t.group || 0; bar.append(el('span', 'ed-tools-sep')); }
       const b = mkBtn('ed-tool', icon(t.id), `${t.label} (${t.key})${t.extra ? ` — ${t.extra}` : ''}`, () => setTool(t.id));
       R.toolBtns[t.id] = b;
       bar.append(b);
@@ -166,8 +186,9 @@ export function createEditor(host, hooks) {
     const status = el('div', 'ed-status');
     R.coords = el('span', 'ed-coords', '');
     R.under = el('span', 'ed-under', '');
+    R.selInfo = el('span', 'ed-selinfo', '');
     R.hint = el('span', 'muted ellipsis', '');
-    status.append(R.coords, R.under, el('span', 'spacer'), R.hint);
+    status.append(R.coords, R.under, R.selInfo, el('span', 'spacer'), R.hint);
     c.append(R.view, status);
     return c;
   }
@@ -180,6 +201,7 @@ export function createEditor(host, hooks) {
 
   function buildSide() {
     const side = el('aside', 'ed-side');
+    R.side = side;
 
     // 색상
     const colors = section('색상');
@@ -204,10 +226,13 @@ export function createEditor(host, hooks) {
     R.opts = el('div', 'ed-opts');
     R.optSec.append(R.opts);
 
-    // 팔레트 자리 (A2)
-    const pal = section('팔레트');
-    pal.append(el('p', 'muted small', '다음 단계에서 추가됩니다'));
-    R.palette = pal;
+    // 효과 미리보기 (효과 메뉴를 고르면 맨 위에 나타남)
+    R.fxSec = section('효과');
+    R.fxSec.classList.add('ed-fx');
+    R.fxSec.hidden = true;
+
+    // 팔레트
+    const pal = buildPalette();
 
     // 내비게이터
     const nav = section('내비게이터');
@@ -227,7 +252,7 @@ export function createEditor(host, hooks) {
     bl.append(R.backup, ' 덮어쓰기 전에 원본 백업');
     info.append(R.info, bl);
 
-    side.append(colors, R.optSec, pal, nav, info);
+    side.append(R.fxSec, colors, R.optSec, pal, nav, info);
     return side;
   }
 
@@ -245,9 +270,9 @@ export function createEditor(host, hooks) {
     R.name.textContent = d ? d.name : '열린 파일 없음';
     R.name.title = d?.path || '';
     R.dirty.hidden = !(d && d.history.dirty);
-    for (const b of [R.save, R.saveAs, R.zoomOut, R.zoomIn, R.fit, R.one, R.grid, R.tile]) b.disabled = !d;
-    R.undo.disabled = !d || !d.history.canUndo;
-    R.redo.disabled = !d || !d.history.canRedo;
+    for (const b of [R.save, R.saveAs, R.zoomOut, R.zoomIn, R.fit, R.one, R.grid, R.tile, R.menuEdit, R.menuImage, R.menuFx]) b.disabled = !d;
+    R.undo.disabled = !d || !d.history.canUndo || !!S.fx;
+    R.redo.disabled = !d || !d.history.canRedo || !!S.fx;
     R.grid.classList.toggle('on', P.grid);
     R.tile.value = String(P.tile);
     R.zoomLabel.textContent = `${Math.round(S.view.zoom * 100)}%`;
@@ -267,7 +292,10 @@ export function createEditor(host, hooks) {
       line: '드래그 · Shift: 0/45/90° 고정 · Esc: 취소',
       rect: '드래그 · Shift: 정사각형 · Esc: 취소',
       ellipse: '드래그 · Shift: 원 · Esc: 취소',
+      select: '드래그: 선택 · Shift: 더하기 · Alt: 빼기 · 선택 안쪽 드래그: 이동 · 빈 곳 클릭: 해제 · Ctrl+A/D/Shift+I',
+      move: '드래그: 선택 영역(없으면 전체) 이동 · 방향키 1px (Shift 10px) · Enter: 확정 · Esc: 취소',
     };
+    R.view.dataset.tool = P.tool;
     R.hint.textContent = hints[P.tool] || '';
     renderOptions();
   }
@@ -290,6 +318,7 @@ export function createEditor(host, hooks) {
       return b;
     }));
     syncPicker();
+    markPal();
   }
 
   function setColor(slot, c) {
@@ -372,11 +401,14 @@ export function createEditor(host, hooks) {
       o.append(optRow('도형', segment([[false, '윤곽선'], [true, '채움']], P.shapeFilled, (v) => { P.shapeFilled = v; savePrefs(); renderOptions(); })));
     }
     if (t === 'picker') o.append(el('p', 'muted small', '클릭한 픽셀의 색(알파 포함)을 가져옵니다.'));
+    if (t === 'select') o.append(el('p', 'muted small', '선택이 있으면 다른 그리기 도구도 선택된 픽셀만 바꿉니다.'));
+    if (t === 'move') o.append(el('p', 'muted small', '선택 영역이 없으면 이미지 전체를 옮깁니다. 캔버스 밖으로 나간 부분은 확정할 때 잘립니다.'));
     R.optSec.hidden = false;
   }
 
   function setTool(id) {
-    if (S.cur) return;
+    if (S.cur || S.fx) return;
+    if (S.float && !SELECT_TOOLS.includes(id)) commitFloat();
     P.tool = id;
     savePrefs();
     syncTools();
@@ -498,12 +530,19 @@ export function createEditor(host, hooks) {
     return {
       w, h, pix, px32: new Uint32Array(pix.buffer), off, octx, imageData, mark: new Uint8Array(w * h),
       path, name, indexed: !!meta.indexed, palSize: meta.colors || 0,
-      history: new History(), dirtyRect: null, colorCount: null,
+      history: meta.history || new History(), dirtyRect: null, colorCount: null, sel: null,
     };
+  }
+
+  // 같은 문서(경로·기록 유지)에서 크기나 내용만 통째로 바꾼 새 문서를 만듭니다. 선택은 해제됩니다.
+  function rebuildDoc(d, w, h, pix) {
+    return makeDoc(w, h, pix, d.path, d.name, { indexed: d.indexed, colors: d.palSize, history: d.history });
   }
 
   function setDoc(doc) {
     cancelStroke();
+    cancelFx();
+    S.float = null;
     S.doc = doc;
     S.autoFit = true;
     S.hover = null;
@@ -511,10 +550,12 @@ export function createEditor(host, hooks) {
     fit();
   }
 
+  const isDirtyNow = () => !!(S.doc && (S.doc.history.dirty || S.float));
   let lastDirty = false;
   function afterChange() {
     syncTop();
-    const dirty = !!(S.doc && S.doc.history.dirty);
+    syncSel();
+    const dirty = isDirtyNow();
     if (dirty !== lastDirty) { lastDirty = dirty; hooks.onDirtyChange?.(dirty); }
     scheduleInfo();
     render();
@@ -539,6 +580,7 @@ export function createEditor(host, hooks) {
         else set.add(c);
       }
       d.colorCount = { n: set.size, trans };
+      if (P.palSource === 'image') { computeImageColors(); renderPal(); }
     }
     const rows = [
       ['크기', `${d.w} × ${d.h}`],
@@ -633,14 +675,42 @@ export function createEditor(host, hooks) {
     if (!viewW) measure();
     flushDoc();
     const r = dpr();
-    drawMain(R.main.getContext('2d'), R.main.width, R.main.height, r, S.doc, S.view, { grid: P.grid, tile: P.tile });
+    drawMain(R.main.getContext('2d'), R.main.width, R.main.height, r, S.doc, S.view, { grid: P.grid, tile: P.tile, float: floatView() });
     drawNavigator(R.nav, 196, 80, r, S.doc, S.view, viewW, viewH);
     drawOverlay();
   }
 
-  function drawOverlay() {
-    drawCursor(R.over.getContext('2d'), R.over.width, R.over.height, dpr(), S.view, cursorCells());
+  // 떠 있는 층을 캔버스로 만들어 둡니다 (내용이 바뀌면 f.off = null 로 무효화)
+  function floatView() {
+    const f = S.float;
+    if (!f) return null;
+    if (!f.off) {
+      f.off = document.createElement('canvas');
+      f.off.width = f.w;
+      f.off.height = f.h;
+      f.off.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(f.pix.buffer), f.w, f.h), 0, 0);
+    }
+    return { canvas: f.off, x: f.x, y: f.y, w: f.w, h: f.h };
   }
+
+  function drawOverlay() {
+    const ctx = R.over.getContext('2d');
+    clearOverlay(ctx, R.over.width, R.over.height);
+    const d = S.doc;
+    if (!d) return;
+    drawCursor(ctx, R.over.width, R.over.height, dpr(), S.view, cursorCells());
+    const phase = Math.floor(Date.now() / 90) % 8;
+    if (d.sel) drawAnts(ctx, dpr(), S.view, Sel.edgesOf(d.sel), d.sel.x, d.sel.y, phase);
+    const dr = S.drag;
+    if (dr && dr.kind === 'select' && dr.moved) {
+      const r = Sel.rectSel(dr.x0, dr.y0, dr.x1, dr.y1);
+      drawAnts(ctx, dpr(), S.view, Sel.edgesOf(r), r.x, r.y, phase);
+    }
+  }
+  // 개미 행렬 애니메이션: 선택이 있을 때만 윤곽선을 다시 그립니다.
+  setInterval(() => {
+    if (S.active && S.doc && (S.doc.sel || (S.drag && S.drag.kind === 'select'))) drawOverlay();
+  }, 110);
   function updateCursor() {
     if (S.active) drawOverlay();
   }
@@ -653,6 +723,7 @@ export function createEditor(host, hooks) {
     if (!d || !h || S.space || (S.drag && S.drag.kind === 'pan')) return null;
     let base;
     const t = P.tool;
+    if (SELECT_TOOLS.includes(t) || S.fx) return null;
     if (t === 'pencil' || t === 'eraser' || t === 'line' || ((t === 'rect' || t === 'ellipse') && !P.shapeFilled)) {
       const fp = T.footprint(P.size, P.shape);
       base = [];
@@ -697,16 +768,55 @@ export function createEditor(host, hooks) {
     }
   }
 
-  function setIdx(i, c) {
+  // rec(획 또는 떠 있는 층의 기록)에 이전 값을 남기면서 픽셀 하나를 씁니다. 선택 영역은 검사하지 않습니다.
+  function put(rec, i, c) {
     const d = S.doc, p = d.px32;
     if (p[i] === c) return;
     if (!d.mark[i]) {
       d.mark[i] = 1;
-      S.cur.idx.push(i);
-      S.cur.before.push(p[i]);
+      rec.idx.push(i);
+      rec.before.push(p[i]);
     }
     p[i] = c;
     dirtyAdd(d, i % d.w, (i / d.w) | 0);
+  }
+
+  // 그리기 도구용: 선택 영역이 있으면 그 안쪽 픽셀만 바꿉니다.
+  function setIdx(i, c) {
+    const sel = S.doc.sel;
+    if (sel && !Sel.selHas(sel, i % S.doc.w, (i / S.doc.w) | 0)) return;
+    put(S.cur, i, c);
+  }
+
+  const newRec = () => ({ idx: [], before: [] });
+
+  function revertRec(rec) {
+    const d = S.doc;
+    for (let k = rec.idx.length - 1; k >= 0; k--) {
+      const i = rec.idx[k];
+      d.px32[i] = rec.before[k];
+      d.mark[i] = 0;
+      dirtyAdd(d, i % d.w, (i / d.w) | 0);
+    }
+    rec.idx.length = 0;
+    rec.before.length = 0;
+  }
+
+  // 기록을 패치로 만들고 표시를 지웁니다. 실제로 바뀐 픽셀이 없으면 null.
+  function finishRec(rec) {
+    const d = S.doc;
+    const n = rec.idx.length;
+    const idx = new Uint32Array(n), before = new Uint32Array(n), after = new Uint32Array(n);
+    let m = 0;
+    for (let k = 0; k < n; k++) {
+      const i = rec.idx[k];
+      d.mark[i] = 0;
+      const a = d.px32[i];
+      if (a === rec.before[k]) continue;
+      idx[m] = i; before[m] = rec.before[k]; after[m] = a;
+      m++;
+    }
+    return m ? { idx: idx.slice(0, m), before: before.slice(0, m), after: after.slice(0, m) } : null;
   }
 
   function setPx(x, y, c) {
@@ -730,15 +840,7 @@ export function createEditor(host, hooks) {
   }
 
   function revertStroke() {
-    const d = S.doc, s = S.cur;
-    for (let k = s.idx.length - 1; k >= 0; k--) {
-      const i = s.idx[k];
-      d.px32[i] = s.before[k];
-      d.mark[i] = 0;
-      dirtyAdd(d, i % d.w, (i / d.w) | 0);
-    }
-    s.idx.length = 0;
-    s.before.length = 0;
+    revertRec(S.cur);
   }
 
   function cancelStroke() {
@@ -751,19 +853,9 @@ export function createEditor(host, hooks) {
     const d = S.doc, s = S.cur;
     S.cur = null;
     if (!d || !s) return;
-    const n = s.idx.length;
-    const idx = new Uint32Array(n), before = new Uint32Array(n), after = new Uint32Array(n);
-    let m = 0;
-    for (let k = 0; k < n; k++) {
-      const i = s.idx[k];
-      d.mark[i] = 0;
-      const a = d.px32[i];
-      if (a === s.before[k]) continue;
-      idx[m] = i; before[m] = s.before[k]; after[m] = a;
-      m++;
-    }
-    if (m) {
-      d.history.push({ idx: idx.slice(0, m), before: before.slice(0, m), after: after.slice(0, m) });
+    const patch = finishRec(s);
+    if (patch) {
+      d.history.push(patch);
       if (s.tool !== 'eraser') pushRecent(s.color);
     }
     afterChange();
@@ -851,6 +943,7 @@ export function createEditor(host, hooks) {
       updateCursor();
       return;
     }
+    if (S.fx) return;
     if (e.button !== 0 && e.button !== 2) return;
     e.preventDefault();
     if (S.cur) return;
@@ -858,13 +951,18 @@ export function createEditor(host, hooks) {
     S.hover = { x, y };
     const color = e.button === 2 ? P.secondary : P.primary;
     let tool = P.tool;
-    if (e.altKey && tool !== 'picker') tool = 'picker';
+    if (e.altKey && tool !== 'picker' && tool !== 'select') tool = 'picker'; // 선택 도구에서 Alt 는 "빼기"
     if (tool === 'picker') {
       S.drag = { kind: 'picker', id: e.pointerId, button: e.button };
       capture(e);
       pick(x, y, e.button);
       return;
     }
+    if (tool === 'select' || tool === 'move') {
+      if (e.button === 0) selectPointerDown(e, tool, x, y);
+      return;
+    }
+    if (S.float) commitFloat();
     if (tool === 'fill') { doFill(x, y, color); return; }
     capture(e);
     if (tool === 'pencil' || tool === 'eraser') {
@@ -878,6 +976,26 @@ export function createEditor(host, hooks) {
       drawShape(x, y, e.shiftKey);
     }
     render();
+  }
+
+  // 선택·이동 도구: 선택 안쪽(또는 이동 도구)에서는 떠 있는 층을 끌고, 그 밖에서는 사각형 선택을 시작합니다.
+  function selectPointerDown(e, tool, x, y) {
+    const d = S.doc;
+    const inside = !!(d.sel && Sel.selHas(d.sel, x, y));
+    const mods = e.shiftKey || e.altKey;
+    if (tool === 'move' || (inside && !mods)) {
+      capture(e);
+      const f = S.float;
+      S.drag = { kind: 'float', id: e.pointerId, sx: x, sy: y, fx: f ? f.x : 0, fy: f ? f.y : 0, cx: e.clientX, cy: e.clientY, moved: false, inside };
+      return;
+    }
+    if (S.float) commitFloat();
+    capture(e);
+    const cx = clamp(x, 0, d.w - 1), cy = clamp(y, 0, d.h - 1);
+    S.drag = {
+      kind: 'select', id: e.pointerId, x0: cx, y0: cy, x1: cx, y1: cy, cx: e.clientX, cy: e.clientY, moved: false,
+      mode: e.shiftKey ? 'add' : e.altKey ? 'sub' : 'replace',
+    };
   }
 
   function capture(e) {
@@ -906,6 +1024,22 @@ export function createEditor(host, hooks) {
       if (dr.kind === 'free') { freehandTo(x, y); render(); }
       else if (dr.kind === 'shape') { dr.x = x; dr.y = y; drawShape(x, y, e.shiftKey); }
       else if (dr.kind === 'picker') pick(x, y, dr.button);
+      else if (dr.kind === 'select') {
+        dr.x1 = clamp(x, 0, d.w - 1); dr.y1 = clamp(y, 0, d.h - 1);
+        if (!dr.moved && Math.hypot(e.clientX - dr.cx, e.clientY - dr.cy) >= 3) dr.moved = true;
+        if (dr.moved) R.selInfo.textContent = `선택 ${Math.abs(dr.x1 - dr.x0) + 1} × ${Math.abs(dr.y1 - dr.y0) + 1}`;
+      } else if (dr.kind === 'float') {
+        if (!dr.moved && Math.hypot(e.clientX - dr.cx, e.clientY - dr.cy) >= 3) dr.moved = true;
+        if (dr.moved || S.float) {
+          let f = S.float;
+          if (!f) {
+            if (x === dr.sx && y === dr.sy) { updateCursor(); return; }
+            f = ensureFloat();
+            dr.fx = f.x; dr.fy = f.y;
+          }
+          moveFloatTo(dr.fx + (x - dr.sx), dr.fy + (y - dr.sy));
+        }
+      }
     }
     updateCursor();
   }
@@ -917,6 +1051,15 @@ export function createEditor(host, hooks) {
     R.view.classList.remove('panning');
     try { R.view.releasePointerCapture(e.pointerId); } catch { /* 무시 */ }
     if (dr.kind === 'free' || dr.kind === 'shape') endStroke();
+    else if (dr.kind === 'select') {
+      const d = S.doc;
+      if (!dr.moved) { if (dr.mode === 'replace') setSelection(null); } // 그냥 클릭 = 선택 해제
+      else setSelection(Sel.combineRect(d.sel, dr.x0, dr.y0, dr.x1, dr.y1, dr.mode, d.w, d.h));
+      syncSel();
+    } else if (dr.kind === 'float') {
+      // 움직이지 않고 떠 있는 층 밖을 눌렀다면 확정
+      if (!dr.moved && S.float && !(S.doc.sel && Sel.selHas(S.doc.sel, dr.sx, dr.sy))) commitFloat();
+    }
     updateCursor();
   }
 
@@ -992,26 +1135,858 @@ export function createEditor(host, hooks) {
   }).observe(R.view);
   window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', render);
 
+  // ---------- 선택 영역 ----------
+
+  const busy = () => !S.doc || !!S.cur || !!S.fx || !!S.drag;
+
+  function selText() {
+    const sel = S.doc?.sel;
+    if (!sel) return '';
+    const rect = sel.count === sel.w * sel.h;
+    return `선택 ${sel.w} × ${sel.h}${rect ? '' : ` (${sel.count}칸)`} @ ${sel.x}, ${sel.y}${S.float ? ' · 떠 있음: Enter 확정, Esc 취소' : ''}`;
+  }
+  function syncSel() {
+    R.selInfo.textContent = selText();
+    updateCursor();
+  }
+
+  function setSelection(sel) {
+    if (!S.doc) return;
+    S.doc.sel = sel;
+    syncSel();
+  }
+
+  function selectAll() {
+    if (busy()) return;
+    commitFloat();
+    setSelection(Sel.allSel(S.doc.w, S.doc.h));
+  }
+  function deselect() {
+    if (busy()) return;
+    commitFloat();
+    setSelection(null);
+  }
+  function invertSelection() {
+    if (busy()) return;
+    commitFloat();
+    setSelection(Sel.invertSel(S.doc.sel, S.doc.w, S.doc.h));
+  }
+
+  // ---------- 떠 있는 층 (이동·붙여넣기) ----------
+  // 선택한 픽셀을 문서에서 떼어 내(원래 자리는 투명하게) f.pix 로 들고 있다가, 확정하면 새 자리에 합성합니다.
+  // 떼어 내기부터 확정까지의 변경은 f.rec 에 모아 두었다가 실행 취소 한 단계로 넣습니다. 선택 마스크는 층과 함께 움직입니다(d.sel.x/y).
+
+  function ensureFloat() {
+    if (S.float) return S.float;
+    const d = S.doc;
+    const origSel = d.sel ? { ...d.sel } : null;
+    if (!d.sel) d.sel = Sel.allSel(d.w, d.h);
+    const sel = d.sel;
+    const pix = Sel.extractPix(d.px32, d.w, d.h, sel);
+    const rec = newRec();
+    for (let y = 0; y < sel.h; y++) {
+      for (let x = 0; x < sel.w; x++) {
+        if (sel.mask[y * sel.w + x]) put(rec, (sel.y + y) * d.w + sel.x + x, 0);
+      }
+    }
+    S.float = { x: sel.x, y: sel.y, w: sel.w, h: sel.h, pix, off: null, rec, origSel };
+    afterChange();
+    return S.float;
+  }
+
+  function moveFloatTo(nx, ny) {
+    const f = S.float, sel = S.doc.sel;
+    f.x = sel.x = nx;
+    f.y = sel.y = ny;
+    syncSel();
+    render();
+  }
+
+  function commitFloat() {
+    const f = S.float;
+    if (!f) return;
+    const d = S.doc;
+    const sel = d.sel;
+    S.float = null;
+    for (let y = 0; y < f.h; y++) {
+      const gy = f.y + y;
+      if (gy < 0 || gy >= d.h) continue;
+      for (let x = 0; x < f.w; x++) {
+        const c = f.pix[y * f.w + x];
+        const gx = f.x + x;
+        if (c >>> 24 === 0 || gx < 0 || gx >= d.w) continue;
+        const i = gy * d.w + gx;
+        put(f.rec, i, over(c, d.px32[i]));
+      }
+    }
+    const patch = finishRec(f.rec);
+    d.sel = Sel.clipSel(sel, d.w, d.h);
+    if (patch) d.history.push(patch);
+    afterChange();
+  }
+
+  function cancelFloat() {
+    const f = S.float;
+    if (!f) return;
+    S.float = null;
+    revertRec(f.rec);
+    S.doc.sel = f.origSel;
+    afterChange();
+  }
+
+  function nudge(dx, dy) {
+    if (!S.doc || S.cur || S.fx) return;
+    if (!S.doc.sel && !S.float) return;
+    const f = ensureFloat();
+    moveFloatTo(f.x + dx, f.y + dy);
+  }
+
+  // 떠 있는 층(없으면 선택 영역을 떼어 낸 뒤)을 뒤집거나 돌립니다. 돌리면 중심을 유지합니다.
+  function transformFloat(kind) {
+    const f = ensureFloat(), sel = S.doc.sel;
+    const r = T.transformPix(f.pix, f.w, f.h, kind);
+    const m = T.transformPix(sel.mask, f.w, f.h, kind);
+    if (kind === 'cw' || kind === 'ccw') {
+      f.x += Math.floor((f.w - r.w) / 2);
+      f.y += Math.floor((f.h - r.h) / 2);
+    }
+    f.pix = r.arr; f.w = r.w; f.h = r.h; f.off = null;
+    sel.mask = m.arr; sel.w = r.w; sel.h = r.h; sel.x = f.x; sel.y = f.y; sel.edges = null;
+    syncSel();
+    render();
+  }
+
+  // ---------- 클립보드 ----------
+
+  // 떠 있는 층 > 선택 영역 > 이미지 전체 순으로 복사합니다.
+  function copySelection(showToast = true) {
+    const d = S.doc;
+    if (!d) return;
+    const f = S.float, sel = d.sel;
+    if (f && sel) clip = { w: f.w, h: f.h, pix: f.pix.slice(), mask: sel.mask.slice() };
+    else if (sel) clip = { w: sel.w, h: sel.h, pix: Sel.extractPix(d.px32, d.w, d.h, sel), mask: sel.mask.slice() };
+    else clip = { w: d.w, h: d.h, pix: d.px32.slice(), mask: new Uint8Array(d.w * d.h).fill(1) };
+    if (showToast) hooks.toast(sel ? `선택 영역을 복사했습니다 (${clip.w} × ${clip.h})` : `이미지 전체를 복사했습니다 (${clip.w} × ${clip.h})`);
+  }
+
+  function deleteSelection() {
+    if (!S.doc || S.cur || S.fx) return;
+    const d = S.doc;
+    if (S.float) { S.float.pix.fill(0); S.float.off = null; commitFloat(); return; }
+    const sel = d.sel;
+    if (!sel) return;
+    S.cur = newStroke('delete', 0);
+    for (let y = 0; y < sel.h; y++) {
+      for (let x = 0; x < sel.w; x++) if (sel.mask[y * sel.w + x]) setIdx((sel.y + y) * d.w + sel.x + x, 0);
+    }
+    endStroke();
+  }
+
+  function cutSelection() {
+    if (busy() || !(S.doc.sel || S.float)) return;
+    copySelection(false);
+    deleteSelection();
+    hooks.toast('잘라냈습니다');
+  }
+
+  function pasteClip() {
+    if (busy()) return;
+    if (!clip) { hooks.toast('붙여넣을 내용이 없습니다. 먼저 복사하세요 (Ctrl+C)'); return; }
+    commitFloat();
+    const d = S.doc, v = S.view;
+    // 지금 보이는 영역의 왼쪽 위에 붙입니다 (문서보다 크면 0, 0)
+    let px = Math.max(0, Math.ceil(-v.ox / v.zoom)), py = Math.max(0, Math.ceil(-v.oy / v.zoom));
+    px = Math.max(0, Math.min(px, d.w - clip.w));
+    py = Math.max(0, Math.min(py, d.h - clip.h));
+    const origSel = d.sel ? { ...d.sel } : null;
+    d.sel = Sel.makeSel(px, py, clip.w, clip.h, clip.mask.slice());
+    S.float = { x: px, y: py, w: clip.w, h: clip.h, pix: clip.pix.slice(), off: null, rec: newRec(), origSel };
+    if (!SELECT_TOOLS.includes(P.tool)) { P.tool = 'move'; savePrefs(); syncTools(); }
+    afterChange();
+  }
+
+  // ---------- 변형 · 캔버스 ----------
+
+  // 문서 전체를 새 픽셀 배열(w×h, Uint32Array)로 바꾸는 편집 하나. 크기가 같으면 픽셀 패치, 다르면 스냅샷 패치를 넣습니다.
+  function commitContent(w, h, px32) {
+    const d = S.doc;
+    if (w === d.w && h === d.h) {
+      const idx = [], before = [], after = [];
+      for (let i = 0; i < px32.length; i++) {
+        if (px32[i] !== d.px32[i]) { idx.push(i); before.push(d.px32[i]); after.push(px32[i]); }
+      }
+      if (!idx.length) return false;
+      for (let k = 0; k < idx.length; k++) {
+        d.px32[idx[k]] = after[k];
+        dirtyAdd(d, idx[k] % d.w, (idx[k] / d.w) | 0);
+      }
+      d.history.push({ idx: Uint32Array.from(idx), before: Uint32Array.from(before), after: Uint32Array.from(after) });
+      afterChange();
+      return true;
+    }
+    const pix1 = new Uint8ClampedArray(px32.buffer, px32.byteOffset, px32.byteLength).slice();
+    d.history.push({ kind: 'snap', w0: d.w, h0: d.h, pix0: d.pix.slice(), w1: w, h1: h, pix1 });
+    setContent(w, h, pix1.slice());
+    return true;
+  }
+
+  // 같은 문서를 새 크기·픽셀로 바꿔 끼웁니다 (기록은 유지, 선택은 해제)
+  function setContent(w, h, pix) {
+    const d = S.doc;
+    const sized = d.w !== w || d.h !== h;
+    S.float = null;
+    S.doc = rebuildDoc(d, w, h, pix);
+    if (sized) {
+      if (S.autoFit) fit(); else clampPan();
+    }
+    afterChange();
+  }
+
+  function transform(kind) {
+    if (busy()) return;
+    const d = S.doc;
+    if (S.float) { transformFloat(kind); return; }
+    if (d.sel) { transformFloat(kind); commitFloat(); return; }
+    const r = T.transformPix(d.px32, d.w, d.h, kind);
+    commitContent(r.w, r.h, r.arr);
+  }
+
+  async function canvasSizeDialog() {
+    if (busy()) return;
+    commitFloat();
+    const d = S.doc;
+    let wIn, hIn;
+    const anchor = { x: 1, y: 1 };
+    const cells = [];
+    const r = await modal({
+      title: '캔버스 크기',
+      build: (b) => {
+        wIn = el('input'); wIn.type = 'number'; wIn.min = 1; wIn.max = MAX_SIDE; wIn.value = d.w;
+        hIn = el('input'); hIn.type = 'number'; hIn.min = 1; hIn.max = MAX_SIDE; hIn.value = d.h;
+        const row = el('div', 'ed-newrow');
+        const f = (label, input) => { const l = el('label', 'ed-newfield'); l.append(el('span', 'field-label', label), input); return l; };
+        row.append(f('너비 (px)', wIn), el('span', 'muted', '×'), f('높이 (px)', hIn));
+        const grid = el('div', 'ed-anchor');
+        const mark = () => cells.forEach((c) => c.classList.toggle('on', c.dataset.ax === String(anchor.x) && c.dataset.ay === String(anchor.y)));
+        for (let ay = 0; ay < 3; ay++) {
+          for (let ax = 0; ax < 3; ax++) {
+            const c = el('button', 'ed-anchor-cell');
+            c.type = 'button';
+            c.dataset.ax = ax; c.dataset.ay = ay;
+            c.title = '기존 이미지를 놓을 위치';
+            c.onclick = () => { anchor.x = ax; anchor.y = ay; mark(); };
+            cells.push(c);
+            grid.append(c);
+          }
+        }
+        mark();
+        const wrap = el('div', 'ed-anchor-wrap');
+        wrap.append(grid, el('p', 'muted small', '기준점: 기존 이미지를 새 캔버스의 어느 쪽에 맞출지 고릅니다. 작아지면 잘리고, 커지면 투명하게 채워집니다.'));
+        b.append(row, wrap, el('p', 'muted small', `현재 ${d.w} × ${d.h}`));
+      },
+      buttons: [
+        { label: '취소', value: null },
+        {
+          label: '적용', value: 'ok', primary: true,
+          validate: () => {
+            const w = Number(wIn.value), h = Number(hIn.value);
+            const ok = Number.isInteger(w) && Number.isInteger(h) && w >= 1 && h >= 1 && w <= MAX_SIDE && h <= MAX_SIDE && w * h <= MAX_PIXELS;
+            if (!ok) hooks.toast(`크기는 1~${MAX_SIDE}px, 전체 ${MAX_PIXELS / 1e6 | 0}백만 픽셀 이하여야 합니다`, 'failed');
+            return ok;
+          },
+        },
+      ],
+    });
+    if (r !== 'ok' || S.doc !== d) return;
+    const nw = Number(wIn.value), nh = Number(hIn.value);
+    if (nw === d.w && nh === d.h) return;
+    const ox = anchor.x === 0 ? 0 : anchor.x === 1 ? Math.floor((nw - d.w) / 2) : nw - d.w;
+    const oy = anchor.y === 0 ? 0 : anchor.y === 1 ? Math.floor((nh - d.h) / 2) : nh - d.h;
+    commitContent(nw, nh, T.cropPix(d.px32, d.w, d.h, -ox, -oy, nw, nh));
+    hooks.toast(`캔버스 크기를 ${nw} × ${nh} 로 바꿨습니다`);
+  }
+
+  function cropToSelection() {
+    if (busy()) return;
+    commitFloat();
+    const d = S.doc, sel = d.sel;
+    if (!sel) { hooks.toast('먼저 자를 영역을 선택하세요 (M)'); return; }
+    if (sel.x === 0 && sel.y === 0 && sel.w === d.w && sel.h === d.h) { hooks.toast('선택 영역이 이미지 전체입니다'); return; }
+    commitContent(sel.w, sel.h, T.cropPix(d.px32, d.w, d.h, sel.x, sel.y, sel.w, sel.h));
+    hooks.toast(`선택 영역으로 잘랐습니다 (${sel.w} × ${sel.h})`);
+  }
+
+  function trimMargins() {
+    if (busy()) return;
+    commitFloat();
+    const d = S.doc;
+    const b = T.opaqueBounds(d.px32, d.w, d.h);
+    if (!b) { hooks.toast('완전히 투명한 이미지라 자를 기준이 없습니다'); return; }
+    const nw = b.x1 - b.x0 + 1, nh = b.y1 - b.y0 + 1;
+    if (nw === d.w && nh === d.h) { hooks.toast('이미 투명한 여백이 없습니다'); return; }
+    commitContent(nw, nh, T.cropPix(d.px32, d.w, d.h, b.x0, b.y0, nw, nh));
+    hooks.toast(`여백을 잘랐습니다 (${d.w} × ${d.h} → ${nw} × ${nh})`);
+  }
+
+  // ---------- 메뉴 ----------
+
+  function closeMenu() {
+    if (!R.menu) return;
+    R.menu.remove();
+    R.menu = null;
+    R.menuBtn?.classList.remove('on');
+    R.menuBtn = null;
+  }
+
+  function toggleMenu(btn, itemsFn) {
+    if (R.menu && R.menuBtn === btn) { closeMenu(); return; }
+    closeMenu();
+    const m = el('div', 'ed-menu');
+    const dis = busy();
+    for (const it of itemsFn()) {
+      if (it === '-') { m.append(el('div', 'ed-menu-sep')); continue; }
+      const b = el('button', 'ed-menu-item');
+      b.type = 'button';
+      b.append(el('span', '', it.label), el('span', 'ed-menu-key', it.key || ''));
+      b.disabled = dis || !!it.disabled;
+      b.onclick = () => { closeMenu(); it.run(); };
+      m.append(b);
+    }
+    host.append(m);
+    const br = btn.getBoundingClientRect(), hr = host.getBoundingClientRect();
+    m.style.top = `${br.bottom - hr.top + 2}px`;
+    m.style.left = `${Math.max(4, Math.min(br.left - hr.left, hr.width - m.offsetWidth - 4))}px`;
+    btn.classList.add('on');
+    R.menu = m;
+    R.menuBtn = btn;
+  }
+  document.addEventListener('pointerdown', (e) => {
+    if (R.menu && !R.menu.contains(e.target) && !e.target.closest('.ed-menubtn')) closeMenu();
+  }, true);
+
+  const hasSel = () => !!(S.doc && (S.doc.sel || S.float));
+  const editMenu = () => [
+    { label: '잘라내기', key: 'Ctrl+X', disabled: !hasSel(), run: cutSelection },
+    { label: '복사', key: 'Ctrl+C', run: () => copySelection() },
+    { label: '붙여넣기', key: 'Ctrl+V', disabled: !clip, run: pasteClip },
+    { label: '선택 영역 지우기', key: 'Delete', disabled: !hasSel(), run: deleteSelection },
+    '-',
+    { label: '전체 선택', key: 'Ctrl+A', run: selectAll },
+    { label: '선택 해제', key: 'Ctrl+D', disabled: !hasSel(), run: deselect },
+    { label: '선택 반전', key: 'Ctrl+Shift+I', run: invertSelection },
+  ];
+  const imageMenu = () => {
+    const sel = hasSel();
+    const what = sel ? ' (선택 영역)' : '';
+    return [
+      { label: `가로 뒤집기${what}`, key: 'Shift+H', run: () => transform('flipH') },
+      { label: `세로 뒤집기${what}`, key: 'Shift+V', run: () => transform('flipV') },
+      { label: `시계 방향 90° 회전${what}`, run: () => transform('cw') },
+      { label: `반시계 방향 90° 회전${what}`, run: () => transform('ccw') },
+      { label: `180° 회전${what}`, run: () => transform('r180') },
+      '-',
+      { label: '캔버스 크기…', run: canvasSizeDialog },
+      { label: '선택 영역으로 자르기', disabled: !sel, run: cropToSelection },
+      { label: '여백 자르기', run: trimMargins },
+    ];
+  };
+  const fxMenu = () => [
+    { label: '색상 줄이기…', run: () => openEffect('reduce') },
+    { label: '팔레트 적용…', run: () => openEffect('recolor') },
+    { label: '1:1 축소…', run: () => openEffect('downscale') },
+    { label: '확대…', run: () => openEffect('upscale') },
+  ];
+
+  // ---------- 효과 (일괄 처리 기능을 현재 이미지에 적용) ----------
+  // 효과를 고르면 오른쪽 맨 위에 옵션 패널이 열리고, 옵션을 바꿀 때마다 Go(ProcessPixels)로 결과를 계산해 캔버스에 미리 보여 줍니다.
+  // 미리 보기는 임시 문서(S.doc 교체)이며 취소하면 원래 문서·보기로 돌아가고, 확인하면 편집 한 단계로 들어갑니다.
+
+  const FX_SCALES = [0, 2, 3, 4, 5, 6, 8, 10, 12, 16];
+  const FX_UPSCALES = [2, 3, 4, 5, 6, 8, 10, 12, 16];
+  const fxPrefs = { mode: 'threshold', threshold: 0.05, maxColors: 16, scale: 0, upscale: 2, palette: '', ...(P.fx || {}) };
+  const saveFxPrefs = () => { P.fx = { ...fxPrefs }; savePrefs(); };
+
+  async function openEffect(kind) {
+    if (busy()) return;
+    commitFloat();
+    closePicker();
+    const d0 = S.doc;
+    const fx = {
+      kind, orig: d0, view: { ...S.view }, autoFit: S.autoFit, b64: toBase64(d0.pix), token: 0, timer: 0, result: null, showOrig: false,
+      sized: `${d0.w}x${d0.h}`, req: null,
+    };
+    S.fx = fx;
+    const titles = { reduce: '색상 줄이기', recolor: '팔레트 적용', downscale: '1:1 축소', upscale: '확대' };
+    const body = el('div', 'ed-opts');
+    const status = el('p', 'small ed-fx-status', '');
+    fx.status = status;
+    const run = () => { clearTimeout(fx.timer); fx.timer = setTimeout(runEffect, 140); };
+
+    if (kind === 'reduce') {
+      const box = el('div', 'ed-opts');
+      const draw = () => {
+        box.replaceChildren();
+        box.append(segment([['threshold', '병합 강도'], ['count', '최대 색상 수']], fxPrefs.mode, (v) => { fxPrefs.mode = v; saveFxPrefs(); draw(); run(); }));
+        if (fxPrefs.mode === 'threshold') {
+          const w = el('div', 'ed-range');
+          const r = el('input');
+          r.type = 'range'; r.min = 0.005; r.max = 0.3; r.step = 0.005; r.value = fxPrefs.threshold;
+          const v = el('span', 'value', Number(fxPrefs.threshold).toFixed(3));
+          r.oninput = () => { fxPrefs.threshold = Number(r.value); v.textContent = fxPrefs.threshold.toFixed(3); saveFxPrefs(); run(); };
+          w.append(r, v);
+          box.append(optRow('클수록 비슷한 색을 더 많이 합칩니다', w));
+        } else {
+          const n = el('input');
+          n.type = 'number'; n.min = 1; n.max = 256; n.value = fxPrefs.maxColors;
+          n.oninput = () => {
+            const v = Math.round(Number(n.value));
+            if (v >= 1 && v <= 256) { fxPrefs.maxColors = v; saveFxPrefs(); run(); }
+          };
+          box.append(optRow('남길 색상 수 (1~256)', n));
+        }
+      };
+      draw();
+      body.append(box);
+      fx.req = () => (fxPrefs.mode === 'count'
+        ? { command: 'reduce', maxColors: fxPrefs.maxColors }
+        : { command: 'reduce', threshold: fxPrefs.threshold });
+    } else if (kind === 'recolor') {
+      const sel = el('select');
+      const fill = (want) => {
+        sel.replaceChildren();
+        if (!PAL.list.length) sel.append(new Option('저장된 팔레트 없음', ''));
+        PAL.list.forEach((p) => sel.append(new Option(`${p.label} (${p.colors.length}색)`, p.name)));
+        if (want && PAL.list.some((p) => p.name === want)) sel.value = want;
+        else if (PAL.list.some((p) => p.name === fxPrefs.palette)) sel.value = fxPrefs.palette;
+        fxPrefs.palette = sel.value;
+      };
+      fill();
+      refreshPalList().then(() => { if (S.fx === fx) { fill(); run(); } });
+      sel.onchange = () => { fxPrefs.palette = sel.value; saveFxPrefs(); run(); };
+      const file = mkBtn('btn small', 'PNG 파일…', '팔레트 PNG (색 1개 = 1px) 고르기', async () => {
+        const f = await PickPaletteFile();
+        if (!f || S.fx !== fx) return;
+        try {
+          const p = await LoadPalette(f);
+          addFilePalette(p);
+          fill(p.name);
+          saveFxPrefs();
+          run();
+        } catch (err) { hooks.toast(String(err), 'failed'); }
+      });
+      body.append(optRow('팔레트', sel), file);
+      fx.req = () => ({ command: 'recolor', palette: sel.value });
+    } else if (kind === 'downscale') {
+      const sel = el('select');
+      FX_SCALES.forEach((v) => sel.append(new Option(v === 0 ? '자동 감지' : `${v}배`, v)));
+      sel.value = String(fxPrefs.scale);
+      sel.onchange = () => { fxPrefs.scale = Number(sel.value); saveFxPrefs(); run(); };
+      body.append(optRow('축소 배율', sel), el('p', 'muted small', '확대돼 저장된 픽셀 아트를 원래 크기로 되돌립니다.'));
+      fx.req = () => ({ command: 'downscale', scale: fxPrefs.scale });
+    } else {
+      const sel = el('select');
+      FX_UPSCALES.forEach((v) => sel.append(new Option(`${v}배`, v)));
+      sel.value = String(fxPrefs.upscale);
+      sel.onchange = () => { fxPrefs.upscale = Number(sel.value); saveFxPrefs(); run(); };
+      body.append(optRow('확대 배율', sel), el('p', 'muted small', '정수 배율로 픽셀을 그대로 키웁니다.'));
+      fx.req = () => ({ command: 'upscale', scale: fxPrefs.upscale });
+    }
+
+    const cmp = el('button', 'btn small', '원본 보기 (누르고 있기)');
+    cmp.type = 'button';
+    cmp.title = '누르고 있는 동안 원본을 보여 줍니다';
+    const showOrig = (on) => { fx.showOrig = on; cmp.classList.toggle('on', on); showFxDoc(); };
+    cmp.onpointerdown = () => showOrig(true);
+    cmp.onpointerup = cmp.onpointerleave = cmp.onpointercancel = () => { if (fx.showOrig) showOrig(false); };
+    fx.ok = mkBtn('btn small primary', '확인', '적용 (Enter)', () => applyEffect());
+    fx.ok.disabled = true;
+    const cancel = mkBtn('btn small', '취소', '되돌리기 (Esc)', () => cancelFx());
+    const foot = el('div', 'row');
+    foot.append(fx.ok, cancel);
+    R.fxSec.replaceChildren(el('h3', '', `효과 — ${titles[kind]}`), body, status, el('p', 'muted small', '선택 영역과 상관없이 이미지 전체에 적용됩니다.'), cmp, foot);
+    R.fxSec.hidden = false;
+    R.side.scrollTop = 0;
+    syncTop();
+    updateCursor();
+    run();
+  }
+
+  async function runEffect() {
+    const fx = S.fx;
+    if (!fx) return;
+    const t = ++fx.token;
+    const d0 = fx.orig;
+    const req = fx.req();
+    if (req.command === 'recolor' && !req.palette) {
+      fx.result = null;
+      fx.status.textContent = '팔레트를 선택하세요';
+      fx.status.className = 'small warn ed-fx-status';
+      fx.ok.disabled = true;
+      showFxDoc();
+      return;
+    }
+    fx.status.textContent = '계산 중…';
+    fx.status.className = 'small muted ed-fx-status';
+    try {
+      const res = await ProcessPixels(req, d0.w, d0.h, fx.b64);
+      if (t !== fx.token || S.fx !== fx) return;
+      if (res.skipped) {
+        fx.result = null;
+        fx.status.textContent = `변화 없음: ${res.message}`;
+        fx.status.className = 'small warn ed-fx-status';
+        fx.ok.disabled = true;
+      } else {
+        const pix = fromBase64(res.pixels, new Uint8ClampedArray(res.width * res.height * 4));
+        fx.result = { doc: rebuildDoc(d0, res.width, res.height, pix), msg: res.message, w: res.width, h: res.height };
+        fx.status.textContent = `${res.message} → ${res.width} × ${res.height}`;
+        fx.status.className = 'small ed-fx-status';
+        fx.ok.disabled = false;
+      }
+    } catch (err) {
+      if (t !== fx.token || S.fx !== fx) return;
+      fx.result = null;
+      fx.status.textContent = String(err);
+      fx.status.className = 'small warn ed-fx-status';
+      fx.ok.disabled = true;
+    }
+    showFxDoc();
+  }
+
+  // 미리 보기 문서(또는 원본)를 화면에 올립니다.
+  function showFxDoc() {
+    const fx = S.fx;
+    if (!fx) return;
+    const want = fx.showOrig || !fx.result ? fx.orig : fx.result.doc;
+    if (S.doc === want) return;
+    S.doc = want;
+    const key = `${want.w}x${want.h}`;
+    if (key !== fx.sized) {
+      fx.sized = key;
+      if (fx.autoFit) fit(); else clampPan();
+    }
+    scheduleInfo();
+    render();
+  }
+
+  // 효과 패널을 닫고 원래 문서·보기로 되돌립니다.
+  function closeFxUi() {
+    const fx = S.fx;
+    clearTimeout(fx.timer);
+    fx.token++;
+    S.fx = null;
+    R.fxSec.hidden = true;
+    R.fxSec.replaceChildren();
+    S.doc = fx.orig;
+    S.view = { ...fx.view };
+    S.autoFit = fx.autoFit;
+    return fx;
+  }
+
+  function cancelFx() {
+    if (!S.fx) return;
+    closeFxUi();
+    afterChange();
+    if (S.autoFit) fit(); else { clampPan(); render(); }
+  }
+
+  function applyEffect() {
+    const fx = S.fx;
+    if (!fx || !fx.result) return;
+    const { doc, msg, w, h } = fx.result;
+    closeFxUi();
+    const changed = commitContent(w, h, new Uint32Array(doc.pix.slice().buffer));
+    if (!changed) { afterChange(); hooks.toast('바뀐 내용이 없습니다'); return; }
+    hooks.toast(`적용했습니다: ${msg}`);
+  }
+
+  // ---------- 팔레트 패널 ----------
+  // 보여 줄 팔레트: 내 팔레트(localStorage) · 이미지에서(빈도순 최대 256색) · 저장된 팔레트(공용 폴더/Lospec) · PNG 파일
+
+  const PAL = { list: [], img: { colors: [], total: 0 }, selIdx: -1 };
+  const palLabel = (name) => (name.toLowerCase().endsWith('.png') ? baseName(name) : name);
+  const toColors = (hexes) => hexes.map((h) => parseHex(h)).filter((c) => c != null);
+
+  function addFilePalette(p) {
+    PAL.list = PAL.list.filter((x) => x.name !== p.name);
+    PAL.list.push({ name: p.name, label: palLabel(p.name), colors: toColors(p.colors) });
+  }
+
+  async function refreshPalList(want) {
+    try {
+      const list = await ListPalettes();
+      const files = PAL.list.filter((p) => p.name.toLowerCase().endsWith('.png'));
+      PAL.list = [...(list || []).map((p) => ({ name: p.name, label: palLabel(p.name), colors: toColors(p.colors) })), ...files];
+    } catch (err) {
+      hooks.toast(String(err), 'failed');
+    }
+    if (want) P.palSource = `pal:${want}`;
+    if (P.palSource.startsWith('pal:') && !PAL.list.some((p) => `pal:${p.name}` === P.palSource)) P.palSource = 'adhoc';
+    savePrefs();
+    renderPal();
+  }
+
+  function computeImageColors() {
+    const d = S.doc;
+    if (!d) { PAL.img = { colors: [], total: 0 }; return; }
+    const m = new Map();
+    const p = d.px32;
+    for (let i = 0; i < p.length; i++) {
+      const c = p[i];
+      if (c >>> 24 === 0) continue;
+      const k = (c | 0xff000000) >>> 0;
+      m.set(k, (m.get(k) || 0) + 1);
+    }
+    const arr = [...m].sort((a, b) => b[1] - a[1]); // 안정 정렬 — 동률이면 먼저 나온 색이 앞
+    PAL.img = { colors: arr.slice(0, 256).map((a) => a[0]), total: arr.length };
+  }
+
+  function curPal() {
+    const src = P.palSource;
+    if (src === 'image') return { id: 'image', label: `이미지에서 (${PAL.img.colors.length}색)`, colors: PAL.img.colors };
+    const p = src.startsWith('pal:') && PAL.list.find((x) => `pal:${x.name}` === src);
+    if (p) return { id: src, label: p.label, colors: p.colors, name: p.name };
+    return { id: 'adhoc', label: `내 팔레트 (${P.adhoc.length}색)`, colors: P.adhoc };
+  }
+
+  function buildPalette() {
+    const pal = section('팔레트');
+    R.palSel = el('select', 'ed-pal-sel');
+    R.palSel.title = '보여 줄 팔레트';
+    R.palSel.onchange = () => {
+      P.palSource = R.palSel.value;
+      PAL.selIdx = -1;
+      if (P.palSource === 'image') computeImageColors();
+      savePrefs();
+      renderPal();
+      R.palSel.blur();
+    };
+    R.palGrid = el('div', 'ed-pal-grid');
+    R.palInfo = el('div', 'muted small ed-pal-info', '');
+    R.palAdd = mkBtn('btn small', '현재 색 추가', '주 색을 내 팔레트에 추가', () => palAdd());
+    R.palDel = mkBtn('btn small', '선택한 색 제거', '팔레트에서 클릭한 색(없으면 주 색과 같은 색)을 내 팔레트에서 제거', () => palRemove());
+    R.palCopy = mkBtn('btn small', '내 팔레트로 복사', '지금 보이는 팔레트를 내 팔레트로 복사해 고칠 수 있게 합니다', () => palCopyToAdhoc());
+    R.palSave = mkBtn('btn small', '팔레트로 저장…', '지금 보이는 색을 공용 팔레트 폴더에 이름을 붙여 저장 (일괄 처리의 팔레트 적용에서도 쓰임)', () => palSave());
+    R.palName = el('input');
+    R.palName.type = 'text';
+    R.palName.placeholder = 'Lospec 팔레트 이름';
+    R.palName.spellcheck = false;
+    R.palName.onkeydown = (e) => { if (e.key === 'Enter') palFetch(); };
+    R.palFetch = mkBtn('btn small', '불러오기', 'Lospec 에서 내려받아 저장하고 표시', () => palFetch());
+    R.palFile = mkBtn('btn small', 'PNG 파일…', '팔레트 PNG (색 1개 = 1px) 파일 열기', () => palFile());
+    const r1 = el('div', 'ed-palrow'), r2 = el('div', 'ed-palrow'), r3 = el('div', 'ed-palrow');
+    r1.append(R.palAdd, R.palDel, R.palCopy);
+    r2.append(R.palName, R.palFetch);
+    r3.append(R.palFile, R.palSave);
+    pal.append(R.palSel, R.palGrid, R.palInfo, r1, r2, r3);
+    R.palette = pal;
+    return pal;
+  }
+
+  function renderPal() {
+    const cur = curPal();
+    R.palSel.replaceChildren(
+      new Option(`내 팔레트 (${P.adhoc.length}색)`, 'adhoc'),
+      new Option(`이미지에서 (${PAL.img.colors.length}색)`, 'image'),
+      ...PAL.list.map((p) => new Option(`${p.label} (${p.colors.length}색)`, `pal:${p.name}`)),
+    );
+    R.palSel.value = cur.id;
+    R.palGrid.replaceChildren(...cur.colors.map((c, i) => {
+      const b = el('button', 'ed-pal-sw');
+      b.type = 'button';
+      b.style.setProperty('--c', css(c));
+      b.dataset.c = String(c);
+      b.title = `${toHex(c)} — 클릭: 주 색, 오른쪽 클릭: 보조 색`;
+      b.onclick = () => { PAL.selIdx = i; setColor('primary', c); b.blur(); };
+      b.oncontextmenu = (e) => { e.preventDefault(); setColor('secondary', c); };
+      return b;
+    }));
+    if (!cur.colors.length) {
+      R.palGrid.append(el('span', 'muted small ed-pal-empty', cur.id === 'adhoc' ? '‘현재 색 추가’로 색을 모아 보세요' : cur.id === 'image' ? '불투명한 색이 없습니다' : '색이 없습니다'));
+    }
+    R.palInfo.textContent = cur.id === 'image' && PAL.img.total > 256 ? `전체 ${PAL.img.total}색 중 많이 쓴 256색만 표시` : cur.id === 'image' ? '많이 쓴 색 순 · 투명 제외' : '';
+    R.palInfo.hidden = !R.palInfo.textContent;
+    const adhoc = cur.id === 'adhoc';
+    R.palAdd.disabled = !adhoc;
+    R.palDel.disabled = !adhoc || !P.adhoc.length;
+    R.palCopy.hidden = adhoc;
+    R.palSave.disabled = !cur.colors.length;
+    markPal();
+  }
+
+  // 팔레트 칸 표시: 주 색과 같으면 굵은 테두리, 보조 색과 같으면 점선 테두리, 마지막으로 클릭한 칸은 살짝 표시
+  function markPal() {
+    if (!R.palGrid) return;
+    let i = 0;
+    for (const b of R.palGrid.children) {
+      if (!b.dataset.c) continue;
+      const c = Number(b.dataset.c);
+      b.classList.toggle('cur', c === P.primary);
+      b.classList.toggle('cur2', c === P.secondary && c !== P.primary);
+      b.classList.toggle('sel', i === PAL.selIdx);
+      i++;
+    }
+  }
+
+  async function palCopyToAdhoc() {
+    const cur = curPal();
+    if (P.adhoc.length) {
+      const r = await modal({
+        title: '내 팔레트로 복사',
+        build: (b) => b.append(el('p', '', `지금 보이는 ${cur.colors.length}색을 내 팔레트로 복사합니다. 기존 내 팔레트(${P.adhoc.length}색)는 사라집니다.`)),
+        buttons: [{ label: '취소', value: null }, { label: '복사', value: 'ok', primary: true }],
+      });
+      if (r !== 'ok') return;
+    }
+    P.adhoc = cur.colors.slice(0, 256);
+    P.palSource = 'adhoc';
+    PAL.selIdx = -1;
+    savePrefs();
+    renderPal();
+  }
+
+  function palAdd() {
+    if (P.palSource !== 'adhoc') return;
+    if (P.primary >>> 24 === 0) { hooks.toast('투명한 색은 팔레트에 추가할 수 없습니다'); return; }
+    const c = (P.primary | 0xff000000) >>> 0;
+    const at = P.adhoc.indexOf(c);
+    if (at >= 0) { PAL.selIdx = at; renderPal(); hooks.toast('이미 팔레트에 있는 색입니다'); return; }
+    if (P.adhoc.length >= 256) { hooks.toast('팔레트는 최대 256색입니다'); return; }
+    P.adhoc.push(c);
+    PAL.selIdx = P.adhoc.length - 1;
+    savePrefs();
+    renderPal();
+  }
+
+  function palRemove() {
+    if (P.palSource !== 'adhoc') return;
+    let i = PAL.selIdx;
+    if (!(i >= 0 && i < P.adhoc.length)) i = P.adhoc.indexOf(P.primary);
+    if (i < 0) { hooks.toast('제거할 색을 팔레트에서 먼저 클릭하세요'); return; }
+    P.adhoc.splice(i, 1);
+    PAL.selIdx = -1;
+    savePrefs();
+    renderPal();
+  }
+
+  async function palFetch() {
+    const name = R.palName.value.trim();
+    if (!name) return;
+    R.palFetch.disabled = true;
+    R.palFetch.textContent = '불러오는 중…';
+    try {
+      const p = await LoadPalette(name);
+      R.palName.value = '';
+      await refreshPalList(p.name);
+    } catch (err) {
+      hooks.toast(String(err), 'failed');
+    } finally {
+      R.palFetch.disabled = false;
+      R.palFetch.textContent = '불러오기';
+    }
+  }
+
+  async function palFile() {
+    const f = await PickPaletteFile();
+    if (!f) return;
+    try {
+      const p = await LoadPalette(f);
+      addFilePalette(p);
+      await refreshPalList(p.name);
+    } catch (err) {
+      hooks.toast(String(err), 'failed');
+    }
+  }
+
+  async function palSave() {
+    const cur = curPal();
+    const colors = cur.colors.filter((c) => c >>> 24 !== 0);
+    if (!colors.length) return;
+    let nameIn;
+    const r = await modal({
+      title: '팔레트로 저장',
+      build: (b) => {
+        nameIn = el('input');
+        nameIn.type = 'text';
+        nameIn.spellcheck = false;
+        nameIn.placeholder = 'my-palette';
+        nameIn.value = cur.name && !cur.name.toLowerCase().endsWith('.png') ? cur.name : '';
+        b.append(
+          el('p', '', `지금 보이는 ${colors.length}색을 공용 팔레트 폴더에 저장합니다.`),
+          nameIn,
+          el('p', 'muted small', '이름은 영문 소문자, 숫자, - 만 쓸 수 있습니다. 저장하면 일괄 처리의 ‘팔레트 적용’ 목록에도 나타납니다.'),
+        );
+      },
+      buttons: [
+        { label: '취소', value: null },
+        {
+          label: '저장', value: 'ok', primary: true,
+          validate: () => {
+            const ok = /^[a-z0-9][a-z0-9-]*$/.test(nameIn.value.trim().toLowerCase());
+            if (!ok) hooks.toast('팔레트 이름은 영문 소문자, 숫자, - 만 쓸 수 있습니다 (예: my-palette)', 'failed');
+            return ok;
+          },
+        },
+      ],
+    });
+    if (r !== 'ok') return;
+    const name = nameIn.value.trim().toLowerCase();
+    try {
+      let force = false;
+      if (await PaletteExists(name)) {
+        const o = await modal({
+          title: '같은 이름의 팔레트가 있습니다',
+          build: (b) => b.append(el('p', '', `‘${name}’ 팔레트를 덮어쓸까요?`)),
+          buttons: [{ label: '취소', value: null }, { label: '덮어쓰기', value: 'ok', primary: true }],
+        });
+        if (o !== 'ok') return;
+        force = true;
+      }
+      const info = await SavePaletteColors(name, colors.map((c) => toHex((c | 0xff000000) >>> 0)), force);
+      await refreshPalList(info.name);
+      hooks.toast(`팔레트 ‘${info.name}’ 저장됨 · ${info.colors.length}색`);
+    } catch (err) {
+      hooks.toast(String(err), 'failed');
+    }
+  }
+
   // ---------- 실행 취소 ----------
 
-  function applyPatch(p) {
-    if (!p) return;
+  function applyPatch(p, dir) {
     const d = S.doc;
+    if (p.kind === 'snap') {
+      const undoing = dir === 'undo';
+      setContent(undoing ? p.w0 : p.w1, undoing ? p.h0 : p.h1, (undoing ? p.pix0 : p.pix1).slice());
+      return;
+    }
+    const arr = dir === 'undo' ? p.before : p.after;
     let x0 = d.w, y0 = d.h, x1 = 0, y1 = 0;
     for (let k = 0; k < p.idx.length; k++) {
       const i = p.idx[k], x = i % d.w, y = (i / d.w) | 0;
+      d.px32[i] = arr[k];
       if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
     }
     dirtyAdd(d, x0, y0);
     dirtyAdd(d, x1, y1);
     afterChange();
   }
-  function undo() { if (S.doc && !S.cur) applyPatch(S.doc.history.undo(S.doc.px32)); }
-  function redo() { if (S.doc && !S.cur) applyPatch(S.doc.history.redo(S.doc.px32)); }
+  function undo() {
+    if (!S.doc || S.cur || S.fx || S.drag) return;
+    commitFloat();
+    const p = S.doc.history.undo();
+    if (p) applyPatch(p, 'undo');
+  }
+  function redo() {
+    if (!S.doc || S.cur || S.fx || S.drag) return;
+    commitFloat();
+    const p = S.doc.history.redo();
+    if (p) applyPatch(p, 'redo');
+  }
 
   // ---------- 파일 ----------
 
   async function confirmDiscard() {
+    cancelFx();
+    commitFloat();
     const d = S.doc;
     if (!d || !d.history.dirty) return true;
     const r = await modal({
@@ -1026,6 +2001,8 @@ export function createEditor(host, hooks) {
 
   async function open(path) {
     if (S.cur) return false;
+    cancelFx();
+    commitFloat();
     const d = S.doc;
     if (d && sameFile(d.path, path) && d.history.dirty) return true; // 이미 열려 있고 고친 상태 — 그대로 둠
     if (!(d && sameFile(d.path, path)) && !(await confirmDiscard())) return false;
@@ -1041,13 +2018,13 @@ export function createEditor(host, hooks) {
   }
 
   async function openDialog() {
-    if (S.cur) return;
+    if (S.cur || S.fx) return;
     const paths = await PickFiles();
     if (paths && paths.length) await open(paths[0]);
   }
 
   async function newDialog() {
-    if (S.cur) return;
+    if (S.cur || S.fx) return;
     let wIn, hIn;
     const r = await modal({
       title: '새 이미지',
@@ -1087,6 +2064,8 @@ export function createEditor(host, hooks) {
 
   // 저장에 성공하면 true
   async function save(as) {
+    if (S.fx) return false;
+    commitFloat();
     const d = S.doc;
     if (!d || S.saving || S.cur) return false;
     S.saving = true;
@@ -1129,6 +2108,13 @@ export function createEditor(host, hooks) {
     if (e.key === 'Alt') { e.preventDefault(); return; }
     if (e.key === 'Shift' && S.drag && S.drag.kind === 'shape' && !e.repeat) { drawShape(S.drag.x, S.drag.y, true); return; }
 
+    // 효과 미리보기 중에는 확인/취소만 받습니다.
+    if (S.fx) {
+      if (e.key === 'Escape') { e.preventDefault(); cancelFx(); }
+      else if (e.key === 'Enter' && t.tagName !== 'BUTTON' && t.tagName !== 'SELECT') { e.preventDefault(); applyEffect(); }
+      return;
+    }
+
     if (ctrl && !e.altKey) {
       if (k === 'z' || k === 'y') {
         if (entering) return;
@@ -1138,14 +2124,38 @@ export function createEditor(host, hooks) {
       else if (k === 'o') { e.preventDefault(); openDialog(); }
       else if (k === 'n') { e.preventDefault(); newDialog(); }
       else if (e.key === "'") { e.preventDefault(); P.grid = !P.grid; savePrefs(); syncTop(); render(); }
+      else if (!entering && S.doc && k === 'a') { e.preventDefault(); selectAll(); }
+      else if (!entering && S.doc && k === 'd') { e.preventDefault(); deselect(); }
+      else if (!entering && S.doc && k === 'i' && e.shiftKey) { e.preventDefault(); invertSelection(); }
+      else if (!entering && S.doc && k === 'c') { e.preventDefault(); if (!busy()) copySelection(); }
+      else if (!entering && S.doc && k === 'x') { e.preventDefault(); cutSelection(); }
+      else if (!entering && S.doc && k === 'v') { e.preventDefault(); pasteClip(); }
       return;
     }
     if (entering) return;
     if (e.altKey || e.metaKey) return;
 
     if (e.key === 'Escape') {
-      if (S.pickerSlot) closePicker();
+      if (R.menu) closeMenu();
+      else if (S.pickerSlot) closePicker();
       else if (S.cur) { cancelStroke(); S.drag = null; render(); }
+      else if (S.drag && S.drag.kind === 'select') { S.drag = null; syncSel(); updateCursor(); }
+      else if (S.float) { S.drag = null; cancelFloat(); }
+      return;
+    }
+    if (e.key === 'Enter') {
+      if (S.float && t.tagName !== 'BUTTON') { e.preventDefault(); S.drag = null; commitFloat(); }
+      return;
+    }
+    if (S.doc && (e.key === 'Delete' || e.key === 'Backspace')) {
+      e.preventDefault();
+      if (!busy()) deleteSelection();
+      return;
+    }
+    if (S.doc && e.key.startsWith('Arrow')) {
+      e.preventDefault();
+      const n = e.shiftKey ? 10 : 1;
+      nudge(e.key === 'ArrowLeft' ? -n : e.key === 'ArrowRight' ? n : 0, e.key === 'ArrowUp' ? -n : e.key === 'ArrowDown' ? n : 0);
       return;
     }
     if (e.code === 'Space') {
@@ -1154,6 +2164,7 @@ export function createEditor(host, hooks) {
       return;
     }
     if (e.repeat && !'[]'.includes(e.key)) return;
+    if (S.doc && e.shiftKey && (k === 'h' || k === 'v')) { e.preventDefault(); transform(k === 'h' ? 'flipH' : 'flipV'); return; }
     let handled = true;
     switch (e.key) {
       case 'b': case 'B': setTool('pencil'); break;
@@ -1161,6 +2172,8 @@ export function createEditor(host, hooks) {
       case 'g': case 'G': setTool('fill'); break;
       case 'i': case 'I': setTool('picker'); break;
       case 'l': case 'L': setTool('line'); break;
+      case 'm': case 'M': setTool('select'); break;
+      case 'v': setTool('move'); break;
       case 'u': setTool('rect'); break;
       case 'U': setTool('ellipse'); break;
       case 'x': case 'X': swapColors(); break;
@@ -1191,13 +2204,15 @@ export function createEditor(host, hooks) {
   syncTools();
   syncColors();
   syncTop();
+  renderPal();
+  refreshPalList();
 
   return {
     open,
     openDialog,
     newDialog,
     confirmDiscard,
-    isDirty: () => !!(S.doc && S.doc.history.dirty),
+    isDirty: () => isDirtyNow(),
     currentPath: () => S.doc?.path || '',
     activate(on) {
       S.active = on;
@@ -1208,6 +2223,8 @@ export function createEditor(host, hooks) {
         else render();
       } else {
         closePicker();
+        closeMenu();
+        cancelFx();
       }
     },
     // 개발·검증용: 현재 문서 상태 확인

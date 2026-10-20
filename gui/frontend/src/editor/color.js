@@ -57,3 +57,14 @@ export function fromBase64(b64, out) {
   for (let i = 0; i < n; i++) out[i] = s.charCodeAt(i);
   return out;
 }
+
+// 비곱셈 RGBA 두 색의 source-over 합성 (src 를 dst 위에)
+export function over(src, dst) {
+  const sa = src >>> 24;
+  if (sa === 255 || dst >>> 24 === 0) return src;
+  if (sa === 0) return dst;
+  const da = dst >>> 24;
+  const oa = sa + da * (255 - sa) / 255;
+  const ch = (s, d) => Math.round((s * sa + d * da * (255 - sa) / 255) / oa);
+  return pack(ch(src & 255, dst & 255), ch((src >>> 8) & 255, (dst >>> 8) & 255), ch((src >>> 16) & 255, (dst >>> 16) & 255), Math.round(oa));
+}

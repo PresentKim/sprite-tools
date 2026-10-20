@@ -3,15 +3,15 @@
 .editor[hidden] { display: none; }
 
 .ed-top {
-  display: flex; align-items: center; gap: 6px; padding: 6px 10px; min-height: 42px;
+  display: flex; align-items: center; gap: 4px; padding: 6px 8px; min-height: 42px;
   border-bottom: 1px solid var(--line); overflow: hidden;
 }
 .ed-top > * { flex: none; }
-.ed-top > .ed-name { flex: 0 1 auto; font-weight: 700; }
+.ed-top > .ed-name { flex: 0 1 auto; min-width: 3.2em; font-weight: 700; }
 .ed-top > .spacer { flex: 1 1 0; min-width: 0; }
 .ed-dirty { color: var(--warn); font-size: 12px; }
 .ed-dirty[hidden] { display: none; }
-.ed-sep { width: 1px; height: 18px; background: var(--line); margin: 0 2px; }
+.ed-sep { width: 1px; height: 18px; background: var(--line); margin: 0 1px; }
 .ed-zoom { min-width: 46px; text-align: center; font-variant-numeric: tabular-nums; color: var(--muted); }
 .ed-top .btn.small { padding: 3px 8px; }
 .ed-top .ed-toggle { display: grid; place-items: center; padding: 3px 6px; }
@@ -136,3 +136,58 @@
   .preview .toolbar { gap: 6px; padding-left: 8px; padding-right: 8px; }
   #zoom-seg button { padding: 3px 5px; }
 }
+
+/* 선택 · 이동 */
+.ed-view[data-tool="select"] { cursor: crosshair; }
+.ed-view[data-tool="move"] { cursor: move; }
+.ed-selinfo { color: var(--accent); font-variant-numeric: tabular-nums; }
+
+/* 메뉴 */
+.ed-top .ed-menubtn { padding: 3px 7px; }
+.ed-top .ed-menubtn.on { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 22%, var(--panel-2)); }
+.ed-menu {
+  position: absolute; z-index: 20; min-width: 220px; padding: 4px; border-radius: 8px; display: flex; flex-direction: column;
+  background: var(--panel); border: 1px solid var(--line); box-shadow: 0 8px 28px rgba(0,0,0,.4);
+}
+.ed-menu-item {
+  display: flex; justify-content: space-between; gap: 18px; align-items: center; padding: 5px 10px; border: 0; border-radius: 4px;
+  background: none; color: var(--text); font: inherit; font-size: 13px; text-align: left; cursor: pointer; white-space: nowrap;
+}
+.ed-menu-item:hover:not(:disabled) { background: var(--panel-2); }
+.ed-menu-item:disabled { color: var(--muted); opacity: .55; cursor: default; }
+.ed-menu-key { color: var(--muted); font-size: 11px; }
+.ed-menu-sep { height: 1px; background: var(--line); margin: 4px 2px; }
+
+/* 효과 패널 */
+.ed-fx { border-bottom-color: var(--accent); }
+.ed-fx .row { display: flex; gap: 6px; }
+.ed-fx .btn.on { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 22%, var(--panel-2)); }
+.ed-fx-status { margin: 0; min-height: 1.3em; }
+
+/* 팔레트 패널 */
+.ed-pal-sel { width: 100%; }
+.ed-pal-grid {
+  display: grid; grid-template-columns: repeat(10, 1fr); gap: 2px; max-height: 136px; overflow-y: auto; padding: 1px; align-content: start;
+  scrollbar-width: thin;
+}
+.ed-pal-sw {
+  aspect-ratio: 1; padding: 0; border: 1px solid var(--line); border-radius: 2px; cursor: pointer; min-width: 0;
+  background: linear-gradient(var(--c), var(--c)), repeating-conic-gradient(var(--check-a) 0 25%, var(--check-b) 0 50%) 0 0 / 6px 6px;
+}
+.ed-pal-sw:hover { border-color: var(--accent); }
+.ed-pal-sw.sel { box-shadow: 0 0 0 1px var(--muted); }
+.ed-pal-sw.cur2 { outline: 2px dashed var(--muted); outline-offset: -1px; }
+.ed-pal-sw.cur { outline: 2px solid var(--text); outline-offset: -1px; box-shadow: 0 0 0 1px var(--bg); z-index: 1; position: relative; }
+.ed-pal-empty { grid-column: 1 / -1; padding: 6px 2px; }
+.ed-pal-info[hidden], .ed-palrow .btn[hidden] { display: none; }
+.ed-palrow { display: flex; gap: 4px; flex-wrap: wrap; align-items: center; }
+.ed-palrow input[type="text"] { flex: 1 1 90px; min-width: 0; padding: 3px 6px; font-size: 12px; }
+.ed-palrow .btn { flex: none; }
+
+/* 캔버스 크기 대화상자 */
+.ed-anchor-wrap { display: flex; gap: 12px; align-items: center; }
+.ed-anchor-wrap p { margin: 0; }
+.ed-anchor { display: grid; grid-template-columns: repeat(3, 26px); gap: 3px; flex: none; }
+.ed-anchor-cell { width: 26px; height: 26px; padding: 0; border: 1px solid var(--line); border-radius: 4px; background: var(--panel-2); cursor: pointer; }
+.ed-anchor-cell:hover { border-color: var(--accent); }
+.ed-anchor-cell.on { background: var(--accent); border-color: var(--accent); }

@@ -49,6 +49,17 @@ export function drawMain(ctx, cw, ch, dpr, doc, view, o) {
   const px = (i) => Math.round(i * z);
   ctx.drawImage(doc.off, sx0, sy0, sx1 - sx0, sy1 - sy0, dx + px(sx0), dy + px(sy0), px(sx1) - px(sx0), px(sy1) - px(sy0));
 
+  // 떠 있는 층 (이동·붙여넣기 중인 픽셀). 문서 밖으로 나간 부분은 보이지 않게 잘라서 그립니다.
+  const fl = o.float;
+  if (fl) {
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(x0, y0, x1 - x0, y1 - y0);
+    ctx.clip();
+    ctx.drawImage(fl.canvas, dx + px(fl.x), dy + px(fl.y), px(fl.x + fl.w) - px(fl.x), px(fl.y + fl.h) - px(fl.y));
+    ctx.restore();
+  }
+
   // 픽셀 격자
   if (o.grid && view.zoom >= 4) {
     ctx.fillStyle = 'rgba(128,128,128,0.38)';
@@ -72,9 +83,13 @@ export function drawMain(ctx, cw, ch, dpr, doc, view, o) {
 }
 
 // 커서 위치의 브러시 발자국 윤곽. cells: [x,y,x,y,...] (문서 좌표)
-export function drawCursor(ctx, cw, ch, dpr, view, cells) {
+export function clearOverlay(ctx, cw, ch) {
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.clearRect(0, 0, cw, ch);
+}
+
+export function drawCursor(ctx, cw, ch, dpr, view, cells) {
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
   if (!cells || !cells.length) return;
   const z = view.zoom * dpr;
   const dx = Math.round(view.ox * dpr), dy = Math.round(view.oy * dpr);
@@ -97,6 +112,31 @@ export function drawCursor(ctx, cw, ch, dpr, view, cells) {
   ctx.strokeStyle = 'rgba(255,255,255,0.95)';
   ctx.lineWidth = 1;
   ctx.stroke();
+}
+
+// 선택 영역의 개미 행렬 윤곽선. edges: [x0,y0,x1,y1,...] (선택 상자 기준), (ox,oy): 상자의 문서 좌표
+export function drawAnts(ctx, dpr, view, edges, ox, oy, phase) {
+  if (!edges.length) return;
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  const z = view.zoom * dpr;
+  const dx = Math.round(view.ox * dpr), dy = Math.round(view.oy * dpr);
+  const X = (v) => dx + Math.round((ox + v) * z), Y = (v) => dy + Math.round((oy + v) * z);
+  ctx.beginPath();
+  for (let i = 0; i < edges.length; i += 4) {
+    ctx.moveTo(X(edges[i]) + 0.5, Y(edges[i + 1]) + 0.5);
+    ctx.lineTo(X(edges[i + 2]) + 0.5, Y(edges[i + 3]) + 0.5);
+  }
+  const lw = Math.max(1, Math.round(dpr));
+  ctx.lineWidth = lw;
+  ctx.setLineDash([]);
+  ctx.strokeStyle = '#000';
+  ctx.stroke();
+  const d = 4 * lw;
+  ctx.setLineDash([d, d]);
+  ctx.lineDashOffset = -phase * lw;
+  ctx.strokeStyle = '#fff';
+  ctx.stroke();
+  ctx.setLineDash([]);
 }
 
 // 작은 내비게이터: 가능하면 1:1, 크면 칸에 맞춰 줄이고 현재 보이는 영역을 사각형으로 표시합니다.

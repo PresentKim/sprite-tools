@@ -16,6 +16,7 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 
 	"sprite-tools/pkg/common"
+	"sprite-tools/pkg/processor"
 )
 
 // 편집기 문서의 크기 한도입니다 (RGBA 4바이트 * 픽셀 수).
@@ -327,4 +328,104 @@ func b2i(b bool) int {
 		return 1
 	}
 	return 0
+}
+
+// ProcessResult: ProcessPixels 의 결과입니다. Skipped 이면 처리할 것이 없어 Pixels 는 비어 있고 Message 에 이유가 들어 있습니다.
+type ProcessResult struct {
+	Skipped bool   `json:"skipped"`
+	Message string `json:"message"`
+	Width   int    `json:"width"`
+	Height  int    `json:"height"`
+	Pixels  string `json:"pixels"`
+}
+
+// 편집기에서 현재 이미지에 적용할 수 있는 일괄 처리 명령입니다.
+var editorCommands = map[string]bool{"reduce": true, "recolor": true, "downscale": true, "upscale": true, "trim": true}
+
+// ProcessPixels: 편집 중인 픽셀(비곱셈 RGBA, base64)에 일괄 처리 명령(reduce·recolor·downscale·upscale·trim)을 적용한 결과를 돌려줍니다.
+// 파일을 건드리지 않으며, 처리할 것이 없으면(Skip) 오류 없이 Skipped 로 알립니다.
+func (a *App) ProcessPixels(req JobRequest, width, height int, pixelsB64 string) (ProcessResult, error) {
+	if !editorCommands[req.Command] {
+		return ProcessResult{}, fmt.Errorf("편집기에서는 쓸 수 없는 명령입니다: %s", req.Command)
+	}
+	if width <= 0 || height <= 0 || width > maxEditorSide || height > maxEditorSide || width*height > maxEditorPixels {
+		return ProcessResult{}, fmt.Errorf("이미지 크기가 올바르지 않습니다: %d×%d", width, height)
+	}
+	pix, err := base64.StdEncoding.DecodeString(pixelsB64)
+	if err != nil {
+		return ProcessResult{}, fmt.Errorf("픽셀 데이터를 해석할 수 없습니다: %v", err)
+	}
+	if len(pix) != width*height*4 {
+		return ProcessResult{}, fmt.Errorf("픽셀 데이터 크기가 맞지 않습니다 (%d바이트, 필요 %d바이트)", len(pix), width*height*4)
+	}
+	fn, err := a.imageFunc(req)
+	if err != nil {
+		return ProcessResult{}, err
+	}
+	src := &image.NRGBA{Pix: pix, Stride: width * 4, Rect: image.Rect(0, 0, width, height)}
+	dst, msg, err := fn(src)
+	if err != nil {
+		if common.IsSkip(err) {
+			return ProcessResult{Skipped: true, Message: err.Error()}, nil
+		}
+		return ProcessResult{}, err
+	}
+	n := common.ToNRGBA(dst)
+	w, h := n.Rect.Dx(), n.Rect.Dy()
+	if w > maxEditorSide || h > maxEditorSide || w*h > maxEditorPixels {
+		return ProcessResult{}, fmt.Errorf("결과가 편집기 한도를 넘습니다 (%d×%d)", w, h)
+	}
+	return ProcessResult{Message: msg, Width: w, Height: h, Pixels: base64.StdEncoding.EncodeToString(n.Pix)}, nil
+}
+
+// paletteStrip: "#rrggbb" 목록을 팔레트 PNG(색 1개 = 1px, 한 줄)로 만듭니다. 투명도는 무시하고 불투명 색으로 저장합니다.
+func paletteStrip(colors []string) (image.Image, error) {
+	if len(colors) == 0 {
+		return nil, errors.New("저장할 색이 없습니다")
+	}
+	if len(colors) > processor.MaxExtractColors {
+		return nil, fmt.Errorf("색이 너무 많습니다 (%d개, 최대 %d개)", len(colors), processor.MaxExtractColors)
+	}
+	dst := image.NewNRGBA(image.Rect(0, 0, len(colors), 1))
+	for i, s := range colors {
+		t := strings.TrimPrefix(strings.TrimSpace(s), "#")
+		if len(t) != 6 {
+			return nil, fmt.Errorf("잘못된 색입니다: %q", s)
+		}
+		var r, g, b uint8
+		if _, err := fmt.Sscanf(t, "%02x%02x%02x", &r, &g, &b); err != nil {
+			return nil, fmt.Errorf("잘못된 색입니다: %q", s)
+		}
+		copy(dst.Pix[i*4:], []uint8{r, g, b, 255})
+	}
+	return dst, nil
+}
+
+// PaletteExists: 같은 이름의 저장된 팔레트가 이미 있는지 알려 줍니다.
+func (a *App) PaletteExists(name string) (bool, error) {
+	clean, err := processor.NormalizePaletteName(name)
+	if err != nil {
+		return false, err
+	}
+	for _, dir := range processor.PaletteDirs() {
+		if _, err := os.Stat(filepath.Join(dir, clean+".png")); err == nil {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// SavePaletteColors: 색 목록("#rrggbb")을 공용 팔레트 폴더에 이름으로 저장합니다 (일괄 처리의 extract -save 와 같은 폴더·규칙).
+// 같은 이름이 있으면 force 가 아닌 한 거부합니다.
+func (a *App) SavePaletteColors(name string, colors []string, force bool) (PaletteInfo, error) {
+	img, err := paletteStrip(colors)
+	if err != nil {
+		return PaletteInfo{}, err
+	}
+	if _, err := processor.SavePalette(name, img, force); err != nil {
+		return PaletteInfo{}, err
+	}
+	clean, _ := processor.NormalizePaletteName(name)
+	a.forgetPalette(clean)
+	return a.LoadPalette(clean)
 }

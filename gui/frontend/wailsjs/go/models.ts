@@ -178,6 +178,26 @@ export namespace main {
 	        this.millis = source["millis"];
 	    }
 	}
+	export class ProcessResult {
+	    skipped: boolean;
+	    message: string;
+	    width: number;
+	    height: number;
+	    pixels: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ProcessResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.skipped = source["skipped"];
+	        this.message = source["message"];
+	        this.width = source["width"];
+	        this.height = source["height"];
+	        this.pixels = source["pixels"];
+	    }
+	}
 	export class RestoreReport {
 	    restored: number;
 	    errors: string[];
