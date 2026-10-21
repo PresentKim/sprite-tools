@@ -224,6 +224,9 @@ export function createEditor(host, hooks, opts = {}) {
     R.view = el('div', 'ed-view');
     R.main = el('canvas', 'ed-canvas');
     R.over = el('canvas', 'ed-canvas ed-over');
+    // The brush outline must track the mouse with as little delay as possible: ask for a low-latency canvas.
+    // This must be the first getContext call on the canvas; later calls return the same context.
+    R.over.getContext('2d', { desynchronized: true });
     R.empty = el('div', 'ed-empty');
     if (!review) { // in review mode the controller fills the empty state
       const emptyTitle = el('p');
@@ -476,7 +479,7 @@ export function createEditor(host, hooks, opts = {}) {
       o.append(optRow(tr(t === 'rect' || t === 'ellipse' || t === 'line' ? 'editor.opt.line_width' : 'editor.opt.size'), sizeSlider()));
       o.append(optRow(tr('editor.opt.brush_shape'), segment([['square', tr('editor.opt.square')], ['round', tr('editor.opt.round')]], P.shape, (v) => { P.shape = v; savePrefs(); renderOptions(); updateCursor(); })));
     }
-    if (t === 'pencil' || t === 'eraser') {
+    if (t === 'pencil') { // the eraser must remove every pixel it passes, so pixel-perfect is pencil-only
       o.append(checkbox(tr('editor.opt.pixel_perfect'), P.pixelPerfect, (v) => { P.pixelPerfect = v; savePrefs(); },
         tr('editor.opt.pixel_perfect.title')));
     }
@@ -901,8 +904,7 @@ export function createEditor(host, hooks, opts = {}) {
     return out;
   }
 
-  function toDoc(e) {
-    const r = R.view.getBoundingClientRect();
+  function toDoc(e, r = R.view.getBoundingClientRect()) {
     const v = S.view;
     return {
       x: Math.floor((e.clientX - r.left - v.ox) / v.zoom),
@@ -1018,17 +1020,40 @@ export function createEditor(host, hooks, opts = {}) {
     afterChange();
   }
 
-  function repaintFreehand() {
-    revertStroke();
-    const s = S.cur;
-    for (let i = 0; i < s.kept.length; i += 2) stamp(s.kept[i], s.kept[i + 1], s.color);
+  // Cells a 1px stamp at (x, y) touches, including symmetry copies (inside the document only).
+  function cellsOf(x, y) {
+    const d = S.doc, out = [];
+    const add = (cx, cy) => { if (cx >= 0 && cy >= 0 && cx < d.w && cy < d.h) out.push(cy * d.w + cx); };
+    add(x, y);
+    if (P.symX) add(d.w - 1 - x, y);
+    if (P.symY) add(x, d.h - 1 - y);
+    if (P.symX && P.symY) add(d.w - 1 - x, d.h - 1 - y);
+    return out;
+  }
+
+  // Undo the pixel-perfect corner that was just dropped from the path: restore only its cells (unless another kept
+  // point still covers them). This keeps long strokes O(1) per corner instead of repainting the whole stroke.
+  function unpaintCorner(x, y) {
+    const s = S.cur, d = S.doc;
+    const covered = new Set();
+    for (let i = 0; i < s.kept.length; i += 2) for (const c of cellsOf(s.kept[i], s.kept[i + 1])) covered.add(c);
+    for (const i of cellsOf(x, y)) {
+      if (covered.has(i) || !d.mark[i]) continue;
+      for (let k = s.idx.length - 1; k >= 0; k--) {
+        if (s.idx[k] !== i) continue;
+        d.px32[i] = s.before[k];
+        dirtyAdd(d, i % d.w, (i / d.w) | 0);
+        break; // the mark stays set: finishRec skips cells whose value equals the original
+      }
+    }
   }
 
   function freehandPoint(x, y) {
     const s = S.cur;
-    if (P.pixelPerfect && P.size === 1) {
-      if (T.pushPixelPerfect(s.kept, x, y)) repaintFreehand();
-      else if (s.kept.length && s.kept[s.kept.length - 2] === x && s.kept[s.kept.length - 1] === y) stamp(x, y, s.color);
+    if (s.tool === 'pencil' && P.pixelPerfect && P.size === 1) {
+      const dropped = T.pushPixelPerfect(s.kept, x, y);
+      if (dropped) unpaintCorner(dropped[0], dropped[1]);
+      if (s.kept.length && s.kept[s.kept.length - 2] === x && s.kept[s.kept.length - 1] === y) stamp(x, y, s.color);
     } else {
       stamp(x, y, s.color);
     }
@@ -1194,11 +1219,18 @@ export function createEditor(host, hooks, opts = {}) {
       render();
       return;
     }
-    const { x, y } = toDoc(e);
+    const rect = R.view.getBoundingClientRect();
+    const { x, y } = toDoc(e, rect);
     S.hover = { x, y };
     showProbe(x, y);
     if (dr) {
-      if (dr.kind === 'free') { freehandTo(x, y); render(); }
+      if (dr.kind === 'free') {
+        // Use every intermediate position the browser merged into this event so fast strokes follow the real path.
+        const evs = e.getCoalescedEvents ? e.getCoalescedEvents() : [];
+        if (evs.length > 1) for (const ce of evs) { const p = toDoc(ce, rect); freehandTo(p.x, p.y); }
+        else freehandTo(x, y);
+        render();
+      }
       else if (dr.kind === 'shape') { dr.x = x; dr.y = y; drawShape(x, y, e.shiftKey); }
       else if (dr.kind === 'picker') pick(x, y, dr.button);
       else if (dr.kind === 'select') {
@@ -1288,6 +1320,18 @@ export function createEditor(host, hooks, opts = {}) {
 
   R.view.addEventListener('pointerdown', onPointerDown);
   R.view.addEventListener('pointermove', onPointerMove);
+  // pointerrawupdate is delivered as soon as the mouse moves (pointermove waits for the next frame), so moving the
+  // brush outline here removes most of the lag between the system cursor and the outline. Drawing stays in pointermove.
+  if ('onpointerrawupdate' in window) {
+    R.view.addEventListener('pointerrawupdate', (e) => {
+      const dr = S.drag;
+      if (!S.doc || (dr && dr.kind !== 'free' && dr.kind !== 'shape')) return;
+      const p = toDoc(e);
+      if (S.hover && S.hover.x === p.x && S.hover.y === p.y) return;
+      S.hover = p;
+      updateCursor();
+    });
+  }
   R.view.addEventListener('pointerup', onPointerUp);
   R.view.addEventListener('pointercancel', onPointerUp);
   R.view.addEventListener('pointerleave', () => {
@@ -2605,6 +2649,7 @@ export function createEditor(host, hooks, opts = {}) {
       else if (S.cur) { cancelStroke(); S.drag = null; render(); }
       else if (S.drag && S.drag.kind === 'select') { S.drag = null; syncSel(); updateCursor(); }
       else if (S.float) { S.drag = null; cancelFloat(); }
+      else if (S.doc?.sel) deselect();
       return;
     }
     if (e.key === 'Enter') {

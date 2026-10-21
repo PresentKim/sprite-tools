@@ -63,20 +63,20 @@ export function squareEnd(x0, y0, x1, y1) {
 
 // ---------- Pixel perfect ----------
 
-// Add one point to the end of the path while removing the middle point that forms an L-shaped corner. true if a point was removed.
-// path is a flat array [x,y,x,y,...].
+// Add one point to the end of the path while removing the middle point that forms an L-shaped corner.
+// Returns the removed point as [x, y], or null if nothing was removed. path is a flat array [x,y,x,y,...].
 export function pushPixelPerfect(path, x, y) {
   const n = path.length;
-  if (n >= 2 && path[n - 2] === x && path[n - 1] === y) return false;
+  if (n >= 2 && path[n - 2] === x && path[n - 1] === y) return null;
   path.push(x, y);
-  if (path.length < 6) return false;
+  if (path.length < 6) return null;
   const m = path.length;
   const ax = path[m - 6], ay = path[m - 5], bx = path[m - 4], by = path[m - 3];
   if (Math.abs(ax - x) === 1 && Math.abs(ay - y) === 1 && ((ax === bx && by === y) || (ay === by && bx === x))) {
     path.splice(m - 4, 2);
-    return true;
+    return [bx, by];
   }
-  return false;
+  return null;
 }
 
 // ---------- Shapes ----------
