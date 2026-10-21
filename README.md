@@ -68,6 +68,8 @@ Open the `Editor` tab at the top (or press `Ctrl+2`) to edit PNGs directly. It i
 
 ### Review mode
 
+![Review mode](docs/screenshots/review.png)
+
 Open the `Review` tab (or press `Ctrl+3`) to go through **thousands** of images quickly: look, fix if needed, move on if fine, delete the bad ones. It reviews the batch list (files with errors excluded; the name filter applies), or press `Open folder…` to review another folder. One image is shown at a time, with the editor's tools, effects and palette still available, a progress bar, counters (reviewed / edited / deleted) and a filmstrip of thumbnails around the current image (click one to jump).
 
 | Key | Action |
