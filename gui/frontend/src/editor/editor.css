@@ -162,7 +162,7 @@
 .ed-strip-adds { display: flex; gap: 4px; padding: 0 8px; }
 .ed-strip-adds .btn { flex: 1; padding: 3px 4px; font-size: 12px; min-width: 0; }
 .ed-strip .filter { margin: 0 8px; width: auto; padding: 3px 6px; font-size: 12px; }
-.ed-strip-list { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; scrollbar-width: thin; padding: 2px 0; }
+.ed-strip-list { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; scrollbar-width: thin; position: relative; } /* rows are virtualized (see virtual.js) */
 .ed-strip-empty { padding: 10px; text-align: center; }
 .ed-strip-empty[hidden] { display: none; }
 .ed-strip-foot { display: flex; flex-direction: column; gap: 3px; padding: 6px 8px 8px; border-top: 1px solid var(--line); font-size: 12px; }
@@ -170,7 +170,7 @@
 .ed-strip-foot .check input { margin-top: 2px; }
 .ed-file {
   position: relative; display: grid; grid-template-columns: 32px 1fr auto; gap: 7px; align-items: center;
-  padding: 4px 6px 4px 8px; border-left: 3px solid transparent; cursor: pointer;
+  padding: 0 6px 0 8px; border-left: 3px solid transparent; cursor: pointer; overflow: hidden;
 }
 .ed-file:hover { background: var(--panel-2); }
 .ed-file.current { background: var(--panel-2); border-left-color: var(--accent); }
@@ -280,3 +280,47 @@
 .ed-anchor-cell { width: 26px; height: 26px; padding: 0; border: 1px solid var(--line); border-radius: 4px; background: var(--panel-2); cursor: pointer; }
 .ed-anchor-cell:hover { border-color: var(--accent); }
 .ed-anchor-cell.on { background: var(--accent); border-color: var(--accent); }
+
+/* Review mode */
+.rv-top { flex: none; display: flex; flex-direction: column; gap: 5px; padding: 6px 12px; border-bottom: 1px solid var(--line); }
+.rv-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.rv-row > * { flex: none; }
+.rv-name {
+  flex: 0 1 auto; min-width: 0; max-width: 55%; padding: 0; border: 0; background: none; color: var(--text);
+  font: inherit; font-size: 14px; font-weight: 700; text-align: left; cursor: pointer;
+}
+.rv-name:hover { color: var(--accent); }
+.rv-dir { flex: 1 1 0; min-width: 0; font-size: 12px; }
+.rv-pos { font-size: 14px; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.rv-state { padding: 0 7px; border-radius: 999px; border: 1px solid currentColor; font-size: 11px; white-space: nowrap; }
+.rv-state:empty { display: none; }
+.rv-state.ok { color: var(--ok); }
+.rv-state.edited { color: var(--warn); }
+.rv-bar { flex: 1 1 0; min-width: 60px; height: 6px; border-radius: 3px; background: var(--panel-2); overflow: hidden; }
+.rv-bar i { display: block; height: 100%; background: var(--ok); transition: width .15s; }
+.rv-counts { font-size: 12px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.rv-bottom { flex: none; display: flex; flex-direction: column; border-top: 1px solid var(--line); min-width: 0; }
+.rv-film { position: relative; height: 62px; overflow-x: auto; overflow-y: hidden; scrollbar-width: thin; background: var(--panel); }
+.rv-f { padding: 5px 3px 6px; cursor: pointer; }
+.rv-f img {
+  display: block; width: 100%; height: 100%; object-fit: contain; image-rendering: pixelated; border-radius: 3px;
+  background: repeating-conic-gradient(var(--check-a) 0 25%, var(--check-b) 0 50%) 0 0 / 6px 6px;
+}
+.rv-f:hover { background: var(--panel-2); }
+.rv-f.ok { box-shadow: inset 0 -3px 0 var(--ok); }
+.rv-f.edited { box-shadow: inset 0 -3px 0 var(--warn); }
+.rv-f.current { background: var(--panel-2); outline: 2px solid var(--accent); outline-offset: -2px; }
+.rv-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; padding: 5px 12px; border-top: 1px solid var(--line); min-height: 32px; }
+.rv-controls .spacer { flex: 1 1 0; }
+.rv-controls .btn[hidden] { display: none; }
+.rv-hints { display: flex; flex-wrap: wrap; gap: 3px 14px; padding: 4px 12px 6px; font-size: 11.5px; border-top: 1px solid var(--line); }
+.rv-hint { white-space: nowrap; }
+.rv-hint kbd {
+  padding: 1px 5px; border: 1px solid var(--line); border-radius: 4px; background: var(--panel-2); color: var(--text);
+  font: 11px/1.3 inherit;
+}
+.rv-hint kbd + kbd { margin-left: 2px; }
+@media (max-height: 700px) {
+  .rv-film { height: 54px; }
+  .rv-top { padding-top: 4px; padding-bottom: 4px; }
+}

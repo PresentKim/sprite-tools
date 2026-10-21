@@ -480,8 +480,8 @@ func TestNoHangulInFrontendSources(t *testing.T) {
 var (
 	attrKeyRe = regexp.MustCompile(`data-i18n(?:-html|-title|-placeholder|-aria-label)?="([^"]+)"`)
 	// any string literal that looks like a catalog key (namespaces below); covers t('x'), tn(cond ? 'a' : 'b'), setStatus('x') ...
-	literalKeyRe  = regexp.MustCompile("['\"`]((?:app|batch|common|dialog|editor|help|status|toast)\\.[a-z0-9_.]*[a-z0-9_])['\"`]")
-	templateKeyRe = regexp.MustCompile("`((?:app|batch|common|dialog|editor|help|status|toast)\\.[a-z0-9_.]*\\$\\{[^`]*)`")
+	literalKeyRe  = regexp.MustCompile("['\"`]((?:app|batch|common|dialog|editor|help|review|status|toast)\\.[a-z0-9_.]*[a-z0-9_])['\"`]")
+	templateKeyRe = regexp.MustCompile("`((?:app|batch|common|dialog|editor|help|review|status|toast)\\.[a-z0-9_.]*\\$\\{[^`]*)`")
 	plainTCallRe  = regexp.MustCompile(`\b(?:t|lt)\(\s*['"]([a-z0-9_.]+)['"]`)
 )
 

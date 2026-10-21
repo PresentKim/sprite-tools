@@ -86,6 +86,23 @@ function loadPrefs() {
   }
 }
 
+// Preferences (tool, colors, tool options, keep zoom ...) are shared by every editor instance (the full editor and the
+// single-document review editor), so switching modes keeps the same pencil, colors and effect settings.
+const P = loadPrefs();
+let savePrefsTimer = 0;
+const savePrefs = () => {
+  clearTimeout(savePrefsTimer);
+  savePrefsTimer = setTimeout(() => { try { localStorage.setItem(PREF_KEY, JSON.stringify(P)); } catch { /* ignore */ } }, 200);
+};
+const fxPrefs = { mode: 'threshold', threshold: 0.05, maxColors: 16, scale: 0, upscale: 2, palette: '', minSize: 4, diagonal: true, ...(P.fx || {}) };
+const saveFxPrefs = () => { P.fx = { ...fxPrefs }; savePrefs(); };
+
+// Read and write the shared preferences from outside (the review bar shows the "keep zoom" option).
+export const editorPrefs = {
+  get: (key) => P[key],
+  set: (key, value) => { P[key] = value; savePrefs(); },
+};
+
 let clip = null; // internal clipboard: { w, h, pix: Uint32Array, mask: Uint8Array } - kept even when the document changes
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const sameFile = (a, b) => !!a && !!b && a.toLowerCase().replace(/\\/g, '/') === b.toLowerCase().replace(/\\/g, '/');
@@ -94,13 +111,16 @@ const baseName = (p) => p.split(/[\\/]/).pop();
 // host: the element to put the editor in.
 // hooks: { toast(text, cls, actions), getBackup(), setBackup(on), onSaved(path, info) -> actions[], onDirtyChange(count),
 //   files() -> batch list (shared), getFilter(), setFilter(text), addPaths(paths) -> openable paths[], removeFile(path),
-//   onCurrentChange(path), isBlocked() }
+//   onCurrentChange(path), isBlocked(),
+//   review: { next(), prev(), first(), last(), goto(), trash(), undoDelete() -> bool, openFolder() }  (review mode only) }
+// opts.mode: 'editor' (default; tabs and the file strip) or 'review' (exactly one document at a time, driven by the review
+//   controller through showImage / saveCurrent; the tabs and the file strip are replaced by slots the controller fills).
 //
 // Document model: S.docs is the list of open documents (tabs) and S.doc is the one currently shown. Each document keeps its own pixels, size, history (History), selection (sel),
 // view (view/autoFit) and source path/format, while the tool, colors, tool options, palette and grid are shared by all documents (P).
 // The floating layer (S.float) is committed when leaving a document. Zoom and pan while viewing live in S.view/S.autoFit and are saved to the document when leaving it.
-export function createEditor(host, hooks) {
-  const P = loadPrefs();
+export function createEditor(host, hooks, opts = {}) {
+  const review = opts.mode === 'review';
   const budget = new HistoryBudget(HISTORY_BUDGET);
   let docSeq = 0;
   const S = {
@@ -119,11 +139,6 @@ export function createEditor(host, hooks) {
     fx: null, // effect preview in progress
   };
   const dpr = () => window.devicePixelRatio || 1;
-  let savePrefsTimer = 0;
-  const savePrefs = () => {
-    clearTimeout(savePrefsTimer);
-    savePrefsTimer = setTimeout(() => { try { localStorage.setItem(PREF_KEY, JSON.stringify(P)); } catch { /* ignore */ } }, 200);
-  };
 
   // ---------- UI construction ----------
 
@@ -174,7 +189,9 @@ export function createEditor(host, hooks) {
     R.menuEdit = mkBtn('btn small ed-menubtn', () => tr('editor.menu.edit'), () => tr('editor.menu.edit.title'), (e) => toggleMenu(R.menuEdit, editMenu));
     R.menuImage = mkBtn('btn small ed-menubtn', () => tr('editor.menu.image'), () => tr('editor.menu.image.title'), () => toggleMenu(R.menuImage, imageMenu));
     R.menuFx = mkBtn('btn small ed-menubtn', () => tr('editor.menu.fx'), () => tr('editor.menu.fx.title'), () => toggleMenu(R.menuFx, fxMenu));
-    top.append(R.open, R.new, sep(), R.save, R.saveAs, R.saveAll, sep(), R.undo, R.redo, sep(),
+    // Review mode has no tabs: opening, creating and "save as / save all" make no sense for the single document.
+    const fileButtons = review ? [R.save, sep()] : [R.open, R.new, sep(), R.save, R.saveAs, R.saveAll, sep()];
+    top.append(...fileButtons, R.undo, R.redo, sep(),
       R.menuEdit, R.menuImage, R.menuFx, el('span', 'spacer'), R.zoomOut, R.zoomLabel, R.zoomIn, R.fit, R.one, sep(), R.grid, R.tile);
     return top;
   }
@@ -198,7 +215,7 @@ export function createEditor(host, hooks) {
 
   function buildCenter() {
     const c = el('div', 'ed-center');
-    R.tabs = createTabs({
+    R.tabs = review ? null : createTabs({
       activate: (id) => { const d = S.docs.find((x) => x.id === id); if (d) switchTo(d); },
       close: (id) => { const d = S.docs.find((x) => x.id === id); if (d) closeDoc(d); },
       pin: (id) => { const d = S.docs.find((x) => x.id === id); if (d) pinDoc(d); },
@@ -208,16 +225,18 @@ export function createEditor(host, hooks) {
     R.main = el('canvas', 'ed-canvas');
     R.over = el('canvas', 'ed-canvas ed-over');
     R.empty = el('div', 'ed-empty');
-    const emptyTitle = el('p');
-    const emptyHint = el('p', 'muted small');
-    localized(() => {
-      emptyTitle.textContent = tr('editor.empty.title');
-      emptyHint.textContent = tr('editor.empty.hint');
-    });
-    R.empty.append(el('div', 'empty-art'), emptyTitle, emptyHint);
-    const row = el('div', 'row');
-    row.append(mkBtn('btn', () => tr('editor.open'), '', () => openDialog()), mkBtn('btn', () => tr('editor.new'), '', () => newDialog()));
-    R.empty.append(row);
+    if (!review) { // in review mode the controller fills the empty state
+      const emptyTitle = el('p');
+      const emptyHint = el('p', 'muted small');
+      localized(() => {
+        emptyTitle.textContent = tr('editor.empty.title');
+        emptyHint.textContent = tr('editor.empty.hint');
+      });
+      R.empty.append(el('div', 'empty-art'), emptyTitle, emptyHint);
+      const row = el('div', 'row');
+      row.append(mkBtn('btn', () => tr('editor.open'), '', () => openDialog()), mkBtn('btn', () => tr('editor.new'), '', () => newDialog()));
+      R.empty.append(row);
+    }
     R.view.append(R.main, R.over, R.empty);
 
     const status = el('div', 'ed-status');
@@ -226,7 +245,13 @@ export function createEditor(host, hooks) {
     R.selInfo = el('span', 'ed-selinfo', '');
     R.hint = el('span', 'muted ellipsis', '');
     status.append(R.coords, R.under, R.selInfo, el('span', 'spacer'), R.hint);
-    c.append(R.tabs.el, R.view, status);
+    if (review) {
+      R.reviewTop = el('div', 'rv-top');
+      R.reviewBottom = el('div', 'rv-bottom');
+      c.append(R.reviewTop, R.view, R.reviewBottom, status);
+    } else {
+      c.append(R.tabs.el, R.view, status);
+    }
     return c;
   }
 
@@ -310,7 +335,7 @@ export function createEditor(host, hooks) {
   host.classList.add('editor');
   const top = buildTop();
   const body = el('div', 'ed-body');
-  R.strip = createStrip({
+  R.strip = review ? null : createStrip({
     files: () => hooks.files(),
     filter: () => hooks.getFilter(),
     setFilter: (t) => hooks.setFilter(t),
@@ -318,6 +343,7 @@ export function createEditor(host, hooks) {
       const d = findDocByPath(path);
       return { open: !!d, dirty: !!d && isDirty(d), current: !!(S.doc && sameFile(S.doc.path, path)) };
     },
+    current: () => S.doc?.path || '',
     open: (path, pin) => openPath(path, pin ? 'pin' : 'nav'),
     addFiles: () => addFilesDialog(),
     addFolder: () => addFolderDialog(),
@@ -325,7 +351,7 @@ export function createEditor(host, hooks) {
     get: (k) => P[k === 'collapsed' ? 'stripCollapsed' : k],
     set: (k, v) => { P[k === 'collapsed' ? 'stripCollapsed' : k] = v; savePrefs(); },
   });
-  body.append(buildTools(), R.strip.el, buildCenter(), buildSide());
+  body.append(buildTools(), ...(R.strip ? [R.strip.el] : []), buildCenter(), buildSide());
   host.append(top, body);
   buildPicker();
 
@@ -631,10 +657,10 @@ export function createEditor(host, hooks) {
     const sig = S.docs.map((d) => `${d.id}:${d.name}:${d.path}:${d.preview ? 1 : 0}:${isDirty(d) ? 1 : 0}`).join('|') + `#${S.doc ? S.doc.id : 0}`;
     if (!force && sig === docSig) return;
     docSig = sig;
-    R.tabs.render(S.docs, S.doc ? S.doc.id : 0, isDirty);
-    R.strip.render();
+    R.tabs?.render(S.docs, S.doc ? S.doc.id : 0, isDirty);
+    R.strip?.render();
     const id = S.doc ? S.doc.id : 0;
-    if (id !== lastActiveId) { lastActiveId = id; R.strip.scrollToCurrent(); } // scroll the strip to fit only when the viewed document changes
+    if (id !== lastActiveId) { lastActiveId = id; R.strip?.scrollToCurrent(); } // scroll the strip to fit only when the viewed document changes
   }
 
   function updateDirty() {
@@ -1659,9 +1685,6 @@ export function createEditor(host, hooks) {
 
   const FX_SCALES = [0, 2, 3, 4, 5, 6, 8, 10, 12, 16];
   const FX_UPSCALES = [2, 3, 4, 5, 6, 8, 10, 12, 16];
-  const fxPrefs = { mode: 'threshold', threshold: 0.05, maxColors: 16, scale: 0, upscale: 2, palette: '', minSize: 4, diagonal: true, ...(P.fx || {}) };
-  const saveFxPrefs = () => { P.fx = { ...fxPrefs }; savePrefs(); };
-
   async function openEffect(kind) {
     if (busy()) return;
     commitFloat();
@@ -2530,12 +2553,13 @@ export function createEditor(host, hooks) {
     if (e.key === 'Shift' && S.drag && S.drag.kind === 'shape' && !e.repeat) { drawShape(S.drag.x, S.drag.y, true); return; }
 
     // Moving between files/documents works with any tool (except in fields where text is typed)
-    if (!entering && !ctrl && !e.shiftKey) {
+    if (!review && !entering && !ctrl && !e.shiftKey) {
       if (!e.altKey && (e.key === 'PageDown' || e.key === 'PageUp')) { e.preventDefault(); step(e.key === 'PageDown' ? 1 : -1); return; }
       if (e.altKey && (e.key === 'ArrowRight' || e.key === 'ArrowLeft')) { e.preventDefault(); step(e.key === 'ArrowRight' ? 1 : -1); return; }
     }
-    if (ctrl && e.key === 'Tab') { e.preventDefault(); cycleDoc(e.shiftKey ? -1 : 1); return; }
-    if (ctrl && !e.altKey && !e.shiftKey && k === 'w') {
+    if (review && ctrl && e.key === 'Tab') return; // no tabs to cycle
+    if (!review && ctrl && e.key === 'Tab') { e.preventDefault(); cycleDoc(e.shiftKey ? -1 : 1); return; }
+    if (!review && ctrl && !e.altKey && !e.shiftKey && k === 'w') {
       e.preventDefault();
       const cur = S.doc && S.docs.find((d) => d.id === S.doc.id);
       if (cur) closeDoc(cur);
@@ -2554,10 +2578,14 @@ export function createEditor(host, hooks) {
       if (k === 'z' || k === 'y') {
         if (entering) return;
         e.preventDefault();
-        if (k === 'y' || e.shiftKey) redo(); else undo();
-      } else if (k === 's') { e.preventDefault(); save(e.shiftKey); }
-      else if (k === 'o') { e.preventDefault(); openDialog(); }
-      else if (k === 'n') { e.preventDefault(); newDialog(); }
+        if (k === 'y' || e.shiftKey) redo();
+        // Review mode: with no pixel edit to take back, Ctrl+Z takes back the last file deletion instead.
+        else if (review && !S.cur && !S.float && !S.doc?.history.canUndo && hooks.review.undoDelete()) { /* handled */ }
+        else undo();
+      } else if (k === 's') { e.preventDefault(); save(review ? false : e.shiftKey); }
+      else if (k === 'o') { e.preventDefault(); if (review) hooks.review.openFolder(); else openDialog(); }
+      else if (k === 'n') { e.preventDefault(); if (!review) newDialog(); }
+      else if (review && !entering && k === 'g') { e.preventDefault(); hooks.review.goto(); }
       else if (e.key === "'") { e.preventDefault(); P.grid = !P.grid; savePrefs(); syncTop(); render(); }
       else if (!entering && S.doc && k === 'a') { e.preventDefault(); selectAll(); }
       else if (!entering && S.doc && k === 'd') { e.preventDefault(); deselect(); }
@@ -2569,6 +2597,7 @@ export function createEditor(host, hooks) {
     }
     if (entering) return;
     if (e.altKey || e.metaKey) return;
+    if (review && reviewKey(e, t)) return;
 
     if (e.key === 'Escape') {
       if (R.menu) closeMenu();
@@ -2625,6 +2654,29 @@ export function createEditor(host, hooks) {
     if (handled) e.preventDefault();
   }
 
+  // Review mode keys (no modifier but Shift+Delete): navigation and file deletion. With a selection (or a floating layer)
+  // the arrows, Backspace and Delete keep their editing meaning (nudge / clear pixels), and Shift+Delete still deletes the file.
+  // Returns true when the key was taken.
+  function reviewKey(e, t) {
+    const go = hooks.review;
+    if (!go || (e.shiftKey && e.key !== 'Delete')) return false;
+    const sel = hasSel();
+    const take = (fn) => { e.preventDefault(); fn(); return true; };
+    switch (e.key) {
+      case 'PageDown': return take(go.next);
+      case 'ArrowRight': return sel ? false : take(go.next);
+      case 'Enter': return S.float || t.tagName === 'BUTTON' ? false : take(go.next);
+      case 'PageUp': return take(go.prev);
+      case 'ArrowLeft': case 'Backspace': return sel ? false : take(go.prev);
+      case 'Home': return take(go.first);
+      case 'End': return take(go.last);
+      case 'Delete':
+        if (sel && !e.shiftKey) return false;
+        return take(() => { if (!e.repeat) go.trash(); }); // never repeat: holding the key must not delete a row of files
+      default: return false;
+    }
+  }
+
   function onKeyUp(e) {
     if (!S.active) return;
     if (e.code === 'Space' && S.space) { S.space = false; R.view.classList.remove('pan-ready'); updateCursor(); }
@@ -2655,7 +2707,50 @@ export function createEditor(host, hooks) {
     dirtyCount: () => dirtyDocs().length,
     currentPath: () => S.doc?.path || '',
     // Redraw the file strip when the batch list changes (add, remove, filter, thumbnail refresh).
-    filesChanged: () => R.strip.render(),
+    filesChanged: () => R.strip?.render(),
+    // Re-reads the shared options (e.g. the backup checkbox) after they were changed elsewhere.
+    refresh: () => { syncTop(); R.strip?.syncOptions(); },
+    // ----- Review mode (single document driven by the review controller) -----
+    // Elements the controller fills: the bars above and below the canvas and the empty state.
+    slots: review ? { top: R.reviewTop, bottom: R.reviewBottom, empty: R.empty } : null,
+    // Replaces the shown document with a decoded image { path, width, height, pix: Uint8ClampedArray (owned by the editor
+    // from now on), indexed, colors }. The previous document is dropped without asking: the controller saves it first.
+    showImage(img) {
+      cancelStroke();
+      cancelFx();
+      S.float = null;
+      S.drag = null;
+      const doc = makeDoc(img.width, img.height, img.pix, img.path, baseName(img.path), { indexed: img.indexed, colors: img.colors });
+      const view = keptView(doc);
+      const old = S.docs;
+      S.docs = [doc];
+      activateDoc(doc, { view });
+      for (const d of old) d.history.dispose();
+    },
+    // Shows the empty state (no document).
+    clearImage() {
+      cancelStroke();
+      cancelFx();
+      const old = S.docs;
+      S.docs = [];
+      showNone();
+      for (const d of old) d.history.dispose();
+    },
+    // Saves the shown document in place (no dialogs, no toast). Resolves { ok, error }; { ok: true } when there is nothing to save.
+    async saveCurrent() {
+      if (S.fx) cancelFx(); // an unfinished effect preview is dropped, not applied
+      const d = S.doc;
+      if (!d || !isDirty(d)) return { ok: true, saved: false };
+      if (S.cur || S.drag) return { ok: false, error: tr('toast.save_busy') };
+      const r = await saveDoc(d, false);
+      return r.ok ? { ok: true, saved: true, res: r.res } : { ok: false, error: r.error || '' };
+    },
+    hasSelection: () => hasSel(),
+    // True while the shown document has pixel edits that can be undone.
+    canUndo: () => !!S.doc && (S.doc.history.canUndo || !!S.float),
+    // True while a pointer stroke, drag or effect preview is in progress (navigation must wait).
+    busy: () => !!S.cur || !!S.drag || !!S.fx,
+    doc: () => (S.doc ? { path: S.doc.path, w: S.doc.w, h: S.doc.h } : null),
     // Called by main.js after the language changed and the Go language has been updated:
     // re-applies every label and re-renders the dynamic parts (the effect preview is recomputed in the new language).
     relocalize() {
@@ -2676,6 +2771,11 @@ export function createEditor(host, hooks) {
     activate(on) {
       S.active = on;
       if (on) {
+        // The tool, colors and palettes are shared with the other editor instance, which may have changed them.
+        syncTools();
+        syncColors();
+        renderPal();
+        refreshPalList();
         measure();
         syncTop();
         syncDocs(true);

@@ -66,6 +66,27 @@ Open the `Editor` tab at the top (or press `Ctrl+2`) to edit PNGs directly. It i
 - The undo history of all open documents shares 256MB of memory. When it overflows, the oldest steps of the least recently used document are dropped first (the saved state is preserved), and each document keeps at most 200 steps
 - Closing the window asks once more with `N unsaved documents`, and the ● on the top `Editor` tab lights up if any document has been modified
 
+### Review mode
+
+Open the `Review` tab (or press `Ctrl+3`) to go through **thousands** of images quickly: look, fix if needed, move on if fine, delete the bad ones. It reviews the batch list (files with errors excluded; the name filter applies), or press `Open folder…` to review another folder. One image is shown at a time, with the editor's tools, effects and palette still available, a progress bar, counters (reviewed / edited / deleted) and a filmstrip of thumbnails around the current image (click one to jump).
+
+| Key | Action |
+|---|---|
+| `→` `Enter` `PageDown` | Mark as OK and go to the next image. A modified image is saved first (the backup setting applies); if saving fails you stay on it |
+| `←` `Backspace` `PageUp` | Previous image (status unchanged) |
+| `Delete` | Move the file to the trash folder and show the next image. With a selection or floating layer it clears the selected pixels as usual |
+| `Shift+Delete` | Always delete the file, even with a selection |
+| `Ctrl+Z` | Undo the last deletion (when nothing was edited since); otherwise a normal pixel undo. The notice also has an `Undo delete` button |
+| `Home` `End` `Ctrl+G` | First · last image · go to an image number |
+| `Ctrl+O` | Open a folder |
+
+With a selection the arrow keys still nudge it, and the tool keys (`B E G I L U M W V X [ ]`) keep working. `Unreviewed only` skips what you have already reviewed.
+
+- **Deleting is safe.** A deleted file is moved to a hidden `.sprite-tools-trash` folder next to it (instant, reversible, skipped by scans); the app never deletes anything permanently. When you leave Review you are asked whether to move the trash to the Windows Recycle Bin (`Move to Recycle Bin` / `Keep for now` / `Show`), and the `Recycle deleted (N)` button in the bar does the same at any time. If Windows cannot recycle a file it asks before destroying it.
+- **Backups.** When `Back up before overwriting` is checked (it is visible in the bar), saving an edited image over the original makes a backup each time. Editing thousands of images therefore creates thousands of backups in `.sprite-tools-backup` folders; uncheck it if you do not need them.
+- **Progress is remembered** per folder (the common folder of the files) in the app's local storage: which images were reviewed or edited, the deleted count and the position. Reopening the same folder resumes at the last position automatically (the notice has `Start over`); `Reset progress` forgets it.
+- Speed: the next and previous images are decoded ahead of time, and the file lists (batch list, editor file strip, filmstrip) only draw the rows that are visible, so 3,000+ files stay responsive.
+
 Building requires Go, Node.js and the Wails CLI (`go install github.com/wailsapp/wails/v2/cmd/wails@latest`), and running requires WebView2 (included by default in Windows 10/11).
 
 ## Commands

@@ -15,6 +15,7 @@
       <div class="seg mode-seg" id="mode-seg" role="tablist" data-i18n-aria-label="app.mode.aria">
         <button type="button" data-mode="batch" data-i18n-title="app.mode.batch.title"><span data-i18n="app.mode.batch"></span></button>
         <button type="button" data-mode="editor" data-i18n-title="app.mode.editor.title"><span data-i18n="app.mode.editor"></span><span class="mode-dot" id="mode-dot" hidden>●</span></button>
+        <button type="button" data-mode="review" data-i18n-title="app.mode.review.title"><span data-i18n="app.mode.review"></span></button>
       </div>
       <nav class="tabs" id="tabs" role="tablist"></nav>
       <span class="tabs-spacer" id="tabs-spacer" hidden></span>
@@ -221,6 +222,7 @@
     </main>
 
     <div id="editor" hidden></div>
+    <div id="review" hidden></div>
 
     <footer class="statusbar">
       <div class="progress" id="progress"><div class="bar" id="progress-bar"></div></div>
@@ -240,7 +242,7 @@
         </div>
         <h3 data-i18n="help.section.common"></h3>
         <dl class="keys">
-          <dt><kbd>Ctrl</kbd>+<kbd>1</kbd> <kbd>Ctrl</kbd>+<kbd>2</kbd></dt><dd data-i18n-html="help.common.mode"></dd>
+          <dt><kbd>Ctrl</kbd>+<kbd>1</kbd> <kbd>Ctrl</kbd>+<kbd>2</kbd> <kbd>Ctrl</kbd>+<kbd>3</kbd></dt><dd data-i18n-html="help.common.mode"></dd>
           <dt><kbd>F1</kbd> <kbd>?</kbd></dt><dd data-i18n-html="help.common.help"></dd>
         </dl>
         <h3 data-i18n="help.section.batch"></h3>
@@ -288,6 +290,17 @@
           <dt data-i18n-html="help.multi.pin.keys"></dt><dd data-i18n-html="help.multi.pin"></dd>
         </dl>
         <p class="muted small" data-i18n="help.multi.note"></p>
+        <h3 data-i18n="help.section.review"></h3>
+        <dl class="keys">
+          <dt><kbd>→</kbd> <kbd>Enter</kbd> <kbd>PageDown</kbd></dt><dd data-i18n-html="help.review.next"></dd>
+          <dt><kbd>←</kbd> <kbd>Backspace</kbd> <kbd>PageUp</kbd></dt><dd data-i18n-html="help.review.prev"></dd>
+          <dt><kbd>Delete</kbd></dt><dd data-i18n-html="help.review.delete"></dd>
+          <dt><kbd>Shift</kbd>+<kbd>Delete</kbd></dt><dd data-i18n-html="help.review.delete_always"></dd>
+          <dt><kbd>Ctrl</kbd>+<kbd>Z</kbd></dt><dd data-i18n-html="help.review.undo"></dd>
+          <dt><kbd>Home</kbd> <kbd>End</kbd> <kbd>Ctrl</kbd>+<kbd>G</kbd></dt><dd data-i18n-html="help.review.jump"></dd>
+          <dt><kbd>Ctrl</kbd>+<kbd>O</kbd></dt><dd data-i18n-html="help.review.open"></dd>
+        </dl>
+        <p class="muted small" data-i18n="help.review.note"></p>
         <h3 data-i18n="help.section.view"></h3>
         <dl class="keys">
           <dt data-i18n-html="help.view.zoom.keys"></dt><dd data-i18n-html="help.view.zoom"></dd>

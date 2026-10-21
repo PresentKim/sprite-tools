@@ -1,6 +1,9 @@
 // The editor's file strip: shows the same files as the batch list as thumbnails, and opens one on click.
 // The list itself is owned by the batch screen (main.js); this only reads and draws it (received through hooks).
+// Only the rows near the viewport exist in the DOM (virtual list), so thousands of files stay cheap and only visible
+// rows request their thumbnail.
 import { t as tr } from '../i18n/index.js';
+import { createVirtual } from '../virtual.js';
 import { el, localized } from './ui.js';
 
 export const normPath = (p) => (p || '').toLowerCase().split('\\').join('/');
@@ -13,8 +16,11 @@ export function visibleList(files, filter) {
 
 const localUrl = (f) => `/local?path=${encodeURIComponent(f.path)}&v=${f.v || 0}`;
 
+// Height of one strip row in px (must match .ed-file in editor.css).
+const ROW = 44;
+
 // o: {
-//   files(), filter(), setFilter(text), stateOf(path) -> {open, dirty, current},
+//   files(), filter(), setFilter(text), stateOf(path) -> {open, dirty, current}, current() -> path of the shown document,
 //   open(path, pin), addFiles(), addFolder(), remove(path),
 //   get(key), set(key, value)   // autoSave | keepZoom | collapsed
 // }
@@ -97,7 +103,7 @@ export function createStrip(o) {
   full.append(head, adds, filter, list, empty, foot);
   root.append(rail, full);
 
-  const rows = new Map(); // normPath -> {el, img, v, ...}
+  let shown = []; // the files the list currently shows
 
   function makeRow(f) {
     const row = el('div', 'ed-file');
@@ -107,22 +113,50 @@ export function createStrip(o) {
     img.draggable = false;
     img.alt = '';
     img.onerror = () => img.remove();
+    img.src = localUrl(f);
     thumb.append(img);
     const main = el('div', 'ed-file-main');
     const name = el('div', 'ed-file-name ellipsis');
     const sub = el('div', 'ed-file-sub ellipsis');
     main.append(name, sub);
     const dot = el('span', 'ed-file-dot', '●');
-    dot.title = tr('editor.unsaved');
     const rm = el('button', 'ed-file-x', '×');
     rm.type = 'button';
-    rm.title = tr('editor.strip.remove');
     rm.onclick = (e) => { e.stopPropagation(); o.remove(row.dataset.path); };
     row.append(thumb, main, dot, rm);
     row.onclick = () => o.open(row.dataset.path, false);
     row.ondblclick = () => o.open(row.dataset.path, true);
-    return { el: row, thumb, img, name, sub, v: null };
+    row._parts = { name, sub, dot, rm };
+    return row;
   }
+
+  // Brings an existing row up to date with its file (called for every visible row on every sync).
+  function patchRow(row, i) {
+    const f = shown[i];
+    if (!f) return;
+    const p = row._parts;
+    row.dataset.path = f.path;
+    if (p.name.textContent !== f.name) p.name.textContent = f.name;
+    const sub = f.width ? `${f.width}×${f.height}` : '';
+    if (p.sub.textContent !== sub) p.sub.textContent = sub;
+    row.title = f.path;
+    p.dot.title = tr('editor.unsaved');
+    p.rm.title = tr('editor.strip.remove');
+    const st = o.stateOf(f.path);
+    row.classList.toggle('current', !!st.current);
+    row.classList.toggle('open', !!st.open);
+    row.classList.toggle('dirty', !!st.dirty);
+  }
+
+  // A row is reused while its file and version are unchanged (a changed version reloads the thumbnail).
+  const virt = createVirtual(list, {
+    size: ROW,
+    pad: 2,
+    count: () => shown.length,
+    keyOf: (i) => `${normPath(shown[i].path)}|${shown[i].v || 0}`,
+    make: (i) => makeRow(shown[i]),
+    patch: patchRow,
+  });
 
   function sync() {
     const collapsed = !!o.get('collapsed');
@@ -134,50 +168,21 @@ export function createStrip(o) {
   function render() {
     sync();
     const all = o.files();
-    const shown = visibleList(all, o.filter());
-    const total = all.filter((f) => !f.error).length;
+    shown = visibleList(all, o.filter());
+    const total = all.reduce((n, f) => n + (f.error ? 0 : 1), 0);
     const text = o.filter().trim() ? `${shown.length} / ${total}` : String(total);
     title.textContent = total ? tr('editor.strip.title_n', { text }) : tr('editor.strip.title');
     railCount.textContent = String(total || '');
     if (document.activeElement !== filter && filter.value !== o.filter()) filter.value = o.filter();
-
-    const keep = new Set();
-    const ordered = shown.map((f) => {
-      const key = normPath(f.path);
-      keep.add(key);
-      let r = rows.get(key);
-      if (!r) { r = makeRow(f); rows.set(key, r); }
-      r.el.dataset.path = f.path;
-      if (r.name.textContent !== f.name) r.name.textContent = f.name;
-      const sub = f.width ? `${f.width}×${f.height}` : '';
-      if (r.sub.textContent !== sub) r.sub.textContent = sub;
-      r.el.title = f.path;
-      const v = f.v || 0;
-      if (r.v !== v) { // thumbnails are reloaded only when the file has changed
-        r.v = v;
-        if (!r.img.isConnected) r.thumb.append(r.img);
-        r.img.src = localUrl(f);
-      }
-      const st = o.stateOf(f.path);
-      r.el.classList.toggle('current', !!st.current);
-      r.el.classList.toggle('open', !!st.open);
-      r.el.classList.toggle('dirty', !!st.dirty);
-      return r.el;
-    });
-    for (const [key, r] of rows) if (!keep.has(key)) { r.el.remove(); rows.delete(key); }
-    const same = ordered.length === list.children.length && ordered.every((n, i) => list.children[i] === n);
-    if (!same) list.replaceChildren(...ordered);
+    virt.refresh();
     empty.hidden = shown.length > 0;
     empty.textContent = tr(all.length && !shown.length ? 'editor.strip.no_match' : 'editor.strip.empty');
-    // static texts of existing rows follow the current language
-    for (const r of rows.values()) {
-      r.el.querySelector('.ed-file-dot').title = tr('editor.unsaved');
-      r.el.querySelector('.ed-file-x').title = tr('editor.strip.remove');
-    }
   }
 
   function scrollToCurrent() {
-    list.querySelector('.ed-file.current')?.scrollIntoView({ block: 'nearest' });
+    const cur = normPath(o.current());
+    const i = cur ? shown.findIndex((f) => normPath(f.path) === cur) : -1;
+    if (i >= 0) virt.scrollTo(i);
   }
 
   function syncOptions() {
@@ -186,5 +191,5 @@ export function createStrip(o) {
   foot.querySelectorAll('input').forEach((i, n) => { i.dataset.key = ['autoSave', 'keepZoom'][n]; });
 
   sync();
-  return { el: root, render, scrollToCurrent, syncOptions };
+  return { el: root, render, scrollToCurrent, syncOptions, rendered: () => virt.rendered() };
 }

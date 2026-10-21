@@ -9,6 +9,8 @@ export function DefaultSuffix(arg1:string):Promise<string>;
 
 export function Describe(arg1:Array<string>):Promise<Array<main.FileEntry>>;
 
+export function EmptyTrashToRecycleBin(arg1:Array<string>):Promise<number>;
+
 export function ExpandPaths(arg1:Array<string>,arg2:boolean):Promise<Array<main.FileEntry>>;
 
 export function Language():Promise<string>;
@@ -39,6 +41,8 @@ export function ProcessPixels(arg1:main.JobRequest,arg2:number,arg3:number,arg4:
 
 export function RestoreBackups(arg1:Array<main.BackupPair>):Promise<main.RestoreReport>;
 
+export function RestoreTrashed(arg1:string,arg2:string):Promise<void>;
+
 export function Reveal(arg1:string):Promise<void>;
 
 export function Run(arg1:main.JobRequest,arg2:Array<main.InputFile>):Promise<void>;
@@ -56,3 +60,7 @@ export function SetEditorDirty(arg1:boolean):Promise<void>;
 export function SetEditorDirtyCount(arg1:number):Promise<void>;
 
 export function SetLanguage(arg1:string):Promise<void>;
+
+export function TrashFile(arg1:string):Promise<main.TrashResult>;
+
+export function TrashSummary(arg1:Array<string>):Promise<main.TrashInfo>;

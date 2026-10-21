@@ -257,6 +257,34 @@ export namespace main {
 	        this.bytes = source["bytes"];
 	    }
 	}
+	export class TrashInfo {
+	    count: number;
+	    bytes: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new TrashInfo(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.count = source["count"];
+	        this.bytes = source["bytes"];
+	    }
+	}
+	export class TrashResult {
+	    original: string;
+	    trashed: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new TrashResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.original = source["original"];
+	        this.trashed = source["trashed"];
+	    }
+	}
 
 }
 

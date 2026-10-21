@@ -7,6 +7,8 @@ import {
 import { BrowserOpenURL, EventsOn, OnFileDrop } from '../wailsjs/runtime/runtime';
 import { createEditor } from './editor/editor.js';
 import { DEFAULT_LANGUAGE, applyI18n, getLanguage, languages, onLanguageChange, setLanguage, t, tn } from './i18n/index.js';
+import { createReview } from './review.js';
+import { createVirtual } from './virtual.js';
 
 // out: how the result is saved — file (suffix / other folder / overwrite), extract (no overwrite), slice (frame folder), pack (file chosen when saving)
 // The order is the order of the Alt+1..9 shortcuts; a tab separator is inserted wherever group changes.
@@ -68,7 +70,7 @@ const defaults = {
   threads: 0,
   recursive: true,
   zoom: 'fit',
-  mode: 'batch', // batch | editor - the mode used last
+  mode: 'batch', // batch | editor | review - the mode used last
 };
 const settings = loadSettings();
 const state = {
@@ -465,16 +467,28 @@ async function addPaths(paths, opt = {}) {
   }
 }
 
+// path -> file lookup for event handlers that arrive once per file (job results ...). Rebuilt lazily after the list changed.
+let fileIndex = null;
+function fileByPath(path) {
+  if (!fileIndex) fileIndex = new Map(state.files.map((f) => [f.path, f]));
+  return fileIndex.get(path) || null;
+}
+
 function selectedFile() {
-  return state.files.find((f) => f.path === state.selected) || null;
+  return state.selected ? fileByPath(state.selected) : null;
 }
 
 function select(path, scroll) {
   if (state.selected === path) return;
   state.selected = path;
-  document.querySelectorAll('.file').forEach((r) => r.classList.toggle('selected', r.dataset.path === path));
-  if (scroll) document.querySelector('.file.selected')?.scrollIntoView({ block: 'nearest' });
+  if (scroll) scrollToSelected();
+  fileVirtual.refresh(); // selection marks
   schedulePreview();
+}
+
+function scrollToSelected() {
+  const i = shown.findIndex((f) => f.path === state.selected);
+  if (i >= 0) fileVirtual.scrollTo(i);
 }
 
 // Files that match the filter (visible on screen). All of them if there is no filter.
@@ -538,13 +552,25 @@ function fileRow(f) {
   return row;
 }
 
+// The list is virtualized: only the rows near the viewport exist in the DOM, and only they request thumbnails.
+// A row is rebuilt when its file, version, status or message changes; the selection mark is patched in place.
+let shown = []; // files that match the filter (what the list shows)
+const noMatch = el('div', 'no-match');
+$('file-list').append(noMatch);
+const fileVirtual = createVirtual($('file-list'), {
+  size: 64,
+  count: () => shown.length,
+  keyOf: (i) => { const f = shown[i]; return `${f.path}|${f.v || 0}|${f.status}|${f.message}`; },
+  make: (i) => fileRow(shown[i]),
+  patch: (row, i) => row.classList.toggle('selected', shown[i].path === state.selected),
+});
+
 function renderFiles() {
-  const list = $('file-list');
-  const shown = visibleFiles();
-  list.replaceChildren(...shown.map(fileRow));
-  if (state.files.length && !shown.length) {
-    list.append(el('div', 'no-match', t('batch.files.no_match', { filter: $('file-filter').value.trim() })));
-  }
+  fileIndex = null;
+  shown = visibleFiles();
+  fileVirtual.refresh();
+  noMatch.hidden = !(state.files.length && !shown.length);
+  noMatch.textContent = noMatch.hidden ? '' : t('batch.files.no_match', { filter: $('file-filter').value.trim() });
   $('empty').hidden = state.files.length > 0;
   $('file-count').textContent = !state.files.length ? ''
     : state.filter ? t('batch.files.count_filtered', { shown: shown.length, total: state.files.length }) : tn('batch.files.count', state.files.length);
@@ -561,9 +587,11 @@ function setFilter(text) {
   schedulePreview(); // the pack preview may have different target files
 }
 
-function updateRow(f) {
-  const old = document.querySelector(`.file[data-path="${CSS.escape(f.path)}"]`);
-  if (old) old.replaceWith(fileRow(f));
+// A file's status or message changed: redraw the visible rows (coalesced, since a run reports one file at a time).
+let rowsTimer = 0;
+function updateRow() {
+  if (rowsTimer) return;
+  rowsTimer = requestAnimationFrame(() => { rowsTimer = 0; fileVirtual.refresh(); });
 }
 
 // ---------- Preview ----------
@@ -573,6 +601,7 @@ let previewSeq = 0;
 
 function schedulePreview() {
   clearTimeout(previewTimer);
+  if (settings.mode !== 'batch') return; // the preview is refreshed when returning to batch mode (see applyMode)
   previewTimer = setTimeout(runPreview, 120);
 }
 
@@ -929,11 +958,11 @@ function setProgress(done, total) {
 }
 
 EventsOn('job:result', (r) => {
-  const f = state.files.find((x) => x.path === r.input);
+  const f = fileByPath(r.input);
   if (f) {
     f.status = r.status;
     f.message = r.message;
-    updateRow(f);
+    updateRow();
   }
   if (r.status === 'done') state.lastOutput = r.output || r.input;
   if (r.backup) state.backups.push({ path: r.input, backup: r.backup });
@@ -1000,7 +1029,7 @@ async function restoreBackups(pairs) {
     const rep = await RestoreBackups(pairs);
     const fresh = await Describe(pairs.map((p) => p.path));
     fresh.forEach((e, i) => {
-      const f = state.files.find((x) => x.path === pairs[i].path);
+      const f = fileByPath(pairs[i].path);
       if (f) Object.assign(f, e, { root: f.root, v: Date.now(), status: '', message: '' });
     });
     if (rep.restored === pairs.length) state.backups = []; // so the same backup is not restored twice
@@ -1074,6 +1103,7 @@ function initGlobal() {
   OnFileDrop((_x, _y, paths) => {
     depth = 0;
     overlay.classList.remove('on');
+    if (settings.mode === 'review') { review.drop(paths || []); return; } // add to the list and the review order
     if (settings.mode !== 'editor') { addPaths(paths); return; }
     editor.dropPaths(paths || []); // add to the list and open the first file
   }, false);
@@ -1087,8 +1117,8 @@ function initGlobal() {
     if (e.key === 'Escape' && !$('help').hidden) { toggleHelp(false); return; }
     if (e.key === 'F1' || (e.key === '?' && !entering)) { e.preventDefault(); toggleHelp(); return; }
     if (!$('help').hidden) return; // while the help is open, block other shortcuts
-    if (e.ctrlKey && !e.altKey && (e.key === '1' || e.key === '2')) { e.preventDefault(); setMode(e.key === '1' ? 'batch' : 'editor'); return; }
-    if (settings.mode === 'editor') return; // the editor handles its own shortcuts
+    if (e.ctrlKey && !e.altKey && (e.key === '1' || e.key === '2' || e.key === '3')) { e.preventDefault(); setMode(MODES[Number(e.key) - 1]); return; }
+    if (settings.mode !== 'batch') return; // the editor and review mode handle their own shortcuts
     if (e.ctrlKey && e.key.toLowerCase() === 'f') { e.preventDefault(); $('file-filter').focus(); $('file-filter').select(); return; }
     if (e.ctrlKey && e.key === 'Enter') { e.preventDefault(); startRun(); return; }
     if (e.key === 'Escape' && state.running) { Cancel(); return; }
@@ -1124,9 +1154,14 @@ function initGlobal() {
 
 const normPath = (p) => p.toLowerCase().split('\\').join('/');
 
-// The editor is created once the Go language has been set (see start()), because it calls Go while it is being built.
+// The editors are created once the Go language has been set (see start()), because they call Go while they are being built.
+// `editor` is the full editor (tabs + file strip); `reviewEd` is a second instance that shows one document at a time and is
+// driven by the review controller. Both share the tool, colors and options.
 let editor = null;
-let dirtyCount = 0;
+let reviewEd = null;
+let review = null;
+let dirtyCount = 0; // unsaved documents in the full editor
+let reviewDirty = 0; // 1 while the review editor shows an unsaved image
 
 function renderDirtyDot() {
   const dot = $('mode-dot');
@@ -1135,77 +1170,158 @@ function renderDirtyDot() {
   dot.title = dirtyCount ? tn('app.unsaved_docs', dirtyCount) : '';
 }
 
+function reportDirty() {
+  SetEditorDirtyCount(dirtyCount + reviewDirty).catch(() => {});
+}
+
+// Called after the editor saved a file: if it is in the list, re-read its size, thumbnail and preview; otherwise offer to add it.
+function fileSaved(path) {
+  const f = state.files.find((x) => normPath(x.path) === normPath(path));
+  const actions = [{ label: t('toast.action.reveal'), run: () => Reveal(path) }];
+  if (f) {
+    Describe([path]).then(([e]) => {
+      Object.assign(f, e, { root: f.root, v: Date.now(), status: '', message: '' });
+      renderFiles();
+      schedulePreview();
+    });
+  } else {
+    actions.unshift({ label: t('toast.action.add_to_list'), run: () => addPaths([path]) });
+  }
+  return actions;
+}
+
+// Puts a file back into the list right after `afterPath` (or first when that is empty/unknown): undoing a deletion.
+function insertFile(entry, afterPath) {
+  const k = afterPath ? normPath(afterPath) : '';
+  const i = k ? state.files.findIndex((f) => normPath(f.path) === k) : -1;
+  state.files.splice(i + 1, 0, entry);
+  renderFiles();
+}
+
+// Replaces the whole list with the PNGs found in `paths` (Review mode "Open folder"). Resolves the number of openable files.
+async function replaceFiles(paths) {
+  const entries = await ExpandPaths(paths, settings.recursive);
+  state.files = (entries || []).map((e) => ({ ...e, status: e.error ? 'failed' : '', message: e.error || '', v: Date.now() }));
+  state.selected = (state.files.find((f) => !f.error) || state.files[0])?.path ?? null;
+  if (state.filter) { state.filter = ''; $('file-filter').value = ''; }
+  renderFiles();
+  return state.files.filter((f) => !f.error).length;
+}
+
 function buildEditor() {
-  editor = createEditor($('editor'), {
+  const common = {
     toast,
     isBlocked: () => !$('help').hidden,
     getBackup: () => settings.backup,
-    setBackup: (on) => { settings.backup = on; saveSettings(); renderOutput(); },
+    setBackup: (on) => {
+      settings.backup = on;
+      saveSettings();
+      renderOutput();
+      editor?.refresh();
+      reviewEd?.refresh();
+      review?.syncOptions();
+    },
+    removeFile: (path) => removeFile(path),
+    onSaved: fileSaved,
+  };
+  editor = createEditor($('editor'), {
+    ...common,
     // The editor and batch share the same file list (state.files).
     files: () => state.files,
     getFilter: () => $('file-filter').value,
     setFilter: (text) => setFilter(text),
     addPaths: (paths) => addPaths(paths, { quiet: true }),
-    removeFile: (path) => removeFile(path),
     // Also sync the file being viewed in the editor to the selection of the batch list (the preview is refreshed when returning to batch).
     onCurrentChange: (path) => {
       const f = path && state.files.find((x) => normPath(x.path) === normPath(path));
       if (!f || state.selected === f.path) return;
       state.selected = f.path;
-      document.querySelectorAll('.file').forEach((r) => r.classList.toggle('selected', r.dataset.path === f.path));
+      fileVirtual.refresh();
     },
     // n: number of unsaved documents
     onDirtyChange: (n) => {
       dirtyCount = n;
       renderDirtyDot();
-      SetEditorDirtyCount(n).catch(() => {});
+      reportDirty();
     },
-    // If the saved file is in the list, re-read its size, thumbnail and preview; otherwise let it be added to the list.
-    onSaved: (path) => {
-      const f = state.files.find((x) => normPath(x.path) === normPath(path));
-      const actions = [{ label: t('toast.action.reveal'), run: () => Reveal(path) }];
-      if (f) {
-        Describe([path]).then(([e]) => {
-          Object.assign(f, e, { root: f.root, v: Date.now(), status: '', message: '' });
-          renderFiles();
-          if (settings.mode !== 'editor') schedulePreview();
-        });
-      } else {
-        actions.unshift({ label: t('toast.action.add_to_list'), run: () => addPaths([path]) });
-      }
-      return actions;
+  });
+
+  // The review controller owns navigation; the review editor forwards its keys to it.
+  const go = {
+    next: () => review.next(),
+    prev: () => review.prev(),
+    first: () => review.first(),
+    last: () => review.last(),
+    goto: () => review.promptGoto(),
+    trash: () => review.trashCurrent(),
+    undoDelete: () => review.undoDelete(),
+    openFolder: () => review.openFolder(),
+  };
+  reviewEd = createEditor($('review'), {
+    ...common,
+    onDirtyChange: (n) => {
+      reviewDirty = n;
+      reportDirty();
     },
+    review: go,
+  }, { mode: 'review' });
+
+  review = createReview({
+    ed: reviewEd,
+    toast,
+    entries: () => visibleFiles().filter((f) => !f.error), // the batch list (with its name filter) is what gets reviewed
+    removeFile: (path) => removeFile(path),
+    insertFile,
+    replaceFiles,
+    listChanged: () => renderFiles(),
+    addPaths: (paths) => addPaths(paths, { quiet: true }),
+    pickFolder: () => PickFolder(t('dialog.pick_image_dir')),
+    getBackup: () => settings.backup,
+    setBackup: (on) => common.setBackup(on),
+    reveal: (path) => Reveal(path),
   });
 }
 
+const MODES = ['batch', 'editor', 'review'];
+
 function applyMode() {
-  const ed = settings.mode === 'editor';
-  document.querySelector('.layout').hidden = ed;
-  $('tabs').hidden = ed;
-  $('tabs-spacer').hidden = !ed;
-  $('editor').hidden = !ed;
-  $('mode-seg').querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.mode === settings.mode));
-  editor.activate(ed);
-  if (!ed) { // reflect a selection changed in the editor on the batch screen
+  const m = settings.mode;
+  document.querySelector('.layout').hidden = m !== 'batch';
+  $('tabs').hidden = m !== 'batch';
+  $('tabs-spacer').hidden = m === 'batch';
+  $('editor').hidden = m !== 'editor';
+  $('review').hidden = m !== 'review';
+  $('mode-seg').querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.mode === m));
+  editor.activate(m === 'editor');
+  if (m === 'review') review.enter();
+  if (m === 'batch') { // reflect a selection changed in the editor on the batch screen
     schedulePreview();
-    document.querySelector('.file.selected')?.scrollIntoView({ block: 'nearest' });
+    scrollToSelected();
   }
 }
 
-function setMode(mode) {
-  if (settings.mode === mode) return;
-  settings.mode = mode;
-  saveSettings();
-  applyMode();
+// Switching away from Review first saves a modified image (and stays when saving fails).
+let modeBusy = false;
+async function setMode(mode) {
+  if (settings.mode === mode || modeBusy || !MODES.includes(mode)) return;
+  modeBusy = true;
+  try {
+    if (settings.mode === 'review' && !(await review.leave())) return;
+    settings.mode = mode;
+    saveSettings();
+    applyMode();
+  } finally {
+    modeBusy = false;
+  }
 }
 
 async function openInEditor(path) {
-  setMode('editor');
-  await editor.open(path);
+  await setMode('editor');
+  if (settings.mode === 'editor') await editor.open(path);
 }
 
 function initMode() {
-  if (settings.mode !== 'editor') settings.mode = 'batch';
+  if (!MODES.includes(settings.mode)) settings.mode = 'batch';
   $('mode-seg').querySelectorAll('button').forEach((b) => { b.onclick = () => { setMode(b.dataset.mode); b.blur(); }; });
   applyMode();
 }
@@ -1243,6 +1359,7 @@ async function onLanguageChanged() {
   renderSwatches(state.palettes.find((p) => p.name === settings.palette));
   renderZoom();
   renderOutput();
+  fileVirtual.reset(); // rows hold translated texts
   renderFiles();
   renderStatus();
   renderDirtyDot();
@@ -1250,6 +1367,8 @@ async function onLanguageChanged() {
   await syncGoLanguage(); // Go must know the new language before it produces more text
   if (seq !== langSeq) return;
   editor.relocalize();
+  reviewEd.relocalize();
+  review.relocalize();
   schedulePreview();
 }
 
@@ -1263,7 +1382,7 @@ async function start() {
   initMode();
   $('lang-select').onchange = (e) => { setLanguage(e.target.value); e.target.blur(); };
   onLanguageChange(() => { onLanguageChanged(); });
-  if (import.meta.env.DEV) { window.__addPaths = addPaths; window.__editor = editor; } // in dev mode (browser), use instead of drop
+  if (import.meta.env.DEV) { window.__addPaths = addPaths; window.__editor = editor; window.__review = review; window.__reviewEd = reviewEd; window.__state = state; } // in dev mode (browser), use instead of drop
   renderStatus();
   renderFiles();
   setCommand(COMMANDS.some((c) => c.id === settings.command) ? settings.command : 'reduce');

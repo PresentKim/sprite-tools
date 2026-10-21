@@ -14,6 +14,10 @@ export function Describe(arg1) {
   return window['go']['main']['App']['Describe'](arg1);
 }
 
+export function EmptyTrashToRecycleBin(arg1) {
+  return window['go']['main']['App']['EmptyTrashToRecycleBin'](arg1);
+}
+
 export function ExpandPaths(arg1, arg2) {
   return window['go']['main']['App']['ExpandPaths'](arg1, arg2);
 }
@@ -74,6 +78,10 @@ export function RestoreBackups(arg1) {
   return window['go']['main']['App']['RestoreBackups'](arg1);
 }
 
+export function RestoreTrashed(arg1, arg2) {
+  return window['go']['main']['App']['RestoreTrashed'](arg1, arg2);
+}
+
 export function Reveal(arg1) {
   return window['go']['main']['App']['Reveal'](arg1);
 }
@@ -108,4 +116,12 @@ export function SetEditorDirtyCount(arg1) {
 
 export function SetLanguage(arg1) {
   return window['go']['main']['App']['SetLanguage'](arg1);
+}
+
+export function TrashFile(arg1) {
+  return window['go']['main']['App']['TrashFile'](arg1);
+}
+
+export function TrashSummary(arg1) {
+  return window['go']['main']['App']['TrashSummary'](arg1);
 }
