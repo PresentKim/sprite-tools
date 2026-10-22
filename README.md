@@ -1,3 +1,5 @@
+<p align="center"><img src="docs/logo/logo-256.png" width="128" height="128" alt="Sprite Tools logo: a rainbow slime cat"></p>
+
 # sprite-tools
 
 English | [한국어](README.ko.md)
@@ -24,6 +26,8 @@ cd gui
 wails build        # → gui/build/bin/sprite-tools-gui.exe
 wails dev          # development mode (the UI refreshes when you edit it)
 ```
+
+The app icon (`.exe`, taskbar), the in-app logo and the README logo all come from one 16×16 pixel-art master, `docs/logo/logo-16.png`. After editing it, regenerate every size from the repository root with `go run ./tools/icongen`.
 
 - Drag PNG files or folders onto the window to add them (subfolders can be included or not)
 - Tabs along the top: Reduce colors · Apply palette · Indexed PNG · Extract palette | Downscale 1:1 · Upscale · Trim margins · Despeckle | Slice frames · Pack sheet

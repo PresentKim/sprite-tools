@@ -1,3 +1,5 @@
+<p align="center"><img src="docs/logo/logo-256.png" width="128" height="128" alt="Sprite Tools 로고: 무지개 슬라임 고양이"></p>
+
 # sprite-tools
 
 [English](README.md) | 한국어
@@ -24,6 +26,8 @@ cd gui
 wails build        # → gui/build/bin/sprite-tools-gui.exe
 wails dev          # 개발 모드 (화면 수정 시 자동 갱신)
 ```
+
+앱 아이콘(`.exe`, 작업 표시줄), 앱 안 로고, README 로고는 모두 16×16 픽셀 아트 원본 하나(`docs/logo/logo-16.png`)에서 만듭니다. 원본을 고친 뒤 저장소 루트에서 `go run ./tools/icongen`을 실행하면 모든 크기가 다시 만들어집니다.
 
 - PNG 파일이나 폴더를 창에 끌어다 놓아 추가 (하위 폴더 포함 여부 선택)
 - 위쪽 탭: 색상 줄이기 · 팔레트 적용 · 인덱스 PNG · 팔레트 추출 | 1:1 축소 · 확대 · 여백 자르기 · 조각 지우기 | 프레임 자르기 · 시트 합치기
