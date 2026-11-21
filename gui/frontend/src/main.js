@@ -1276,6 +1276,7 @@ function buildEditor() {
     listChanged: () => renderFiles(),
     addPaths: (paths) => addPaths(paths, { quiet: true }),
     pickFolder: () => PickFolder(t('dialog.pick_image_dir')),
+    pickOutputDir: () => PickFolder(t('dialog.pick_output_dir')),
     getBackup: () => settings.backup,
     setBackup: (on) => common.setBackup(on),
     reveal: (path) => Reveal(path),

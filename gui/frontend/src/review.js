@@ -6,7 +6,7 @@
 //   - images are decoded ahead of time (a small LRU of the current image +-2) so stepping is instant
 //   - delete moves the file to <folder>/.sprite-tools-trash (instant, reversible); the trash is handed to the Recycle Bin on request
 //   - progress (which images were reviewed or edited, and the position) is remembered per folder in localStorage
-import { EmptyTrashToRecycleBin, LoadImageRGBA, RestoreTrashed, TrashFile, TrashSummary } from '../wailsjs/go/main/App';
+import { EmptyTrashToRecycleBin, LoadImageRGBA, MoveToOutput, RestoreMoved, RestoreTrashed, TrashFile, TrashSummary } from '../wailsjs/go/main/App';
 import { fromBase64 } from './editor/color.js';
 import { editorPrefs } from './editor/editor.js';
 import { el, localized, modal } from './editor/ui.js';
@@ -48,7 +48,7 @@ function writeJSON(key, value) {
 // }
 export function createReview(o) {
   const ed = o.ed;
-  const opts = { unreviewedOnly: false, ...readJSON(OPTS_KEY, {}) };
+  const opts = { unreviewedOnly: false, outDir: '', ...readJSON(OPTS_KEY, {}) };
   const S = {
     active: false,
     order: [], // entries (the objects of the batch list) being reviewed, in order
@@ -56,6 +56,7 @@ export function createReview(o) {
     vis: [], // what the filmstrip shows (= order, or only unreviewed images plus the current one)
     status: new Map(), // normalized path -> STATUS_OK | STATUS_EDITED
     deleted: 0, // files deleted in this folder (remembered with the progress)
+    moved: 0,
     key: null, // persistence key: the common folder of the files
     base: '', // that folder, normalized
     loadSeq: 0,
@@ -81,7 +82,7 @@ export function createReview(o) {
     const s = {};
     for (const [k, v] of S.status) if (k.startsWith(prefix)) s[k.slice(prefix.length)] = v;
     const e = current();
-    writeJSON(STORE_PREFIX + S.key, { v: 1, cur: e ? kp(e).slice(prefix.length) : '', s, del: S.deleted, at: Date.now() });
+    writeJSON(STORE_PREFIX + S.key, { v: 1, cur: e ? kp(e).slice(prefix.length) : '', s, del: S.deleted, mv: S.moved, at: Date.now() });
   }
   function persistSoon() {
     if (!saveTimer) saveTimer = setTimeout(persistNow, 700);
@@ -110,11 +111,13 @@ export function createReview(o) {
   function loadProgress(base) {
     S.status = new Map();
     S.deleted = 0;
+    S.moved = 0;
     const saved = readJSON(STORE_PREFIX + (base || '*'), null);
     if (!saved || typeof saved !== 'object') return '';
     const prefix = base ? `${base}/` : '';
     for (const [rel, v] of Object.entries(saved.s || {})) if (v === STATUS_OK || v === STATUS_EDITED) S.status.set(prefix + rel, v);
     S.deleted = Number.isInteger(saved.del) ? saved.del : 0;
+    S.moved = Number.isInteger(saved.mv) ? saved.mv : 0;
     return saved.cur ? prefix + saved.cur : '';
   }
 
@@ -320,35 +323,68 @@ export function createReview(o) {
         o.toast(String(err), 'failed');
         return;
       }
-      const idx = S.cur;
-      const item = { trash: r, entry: e, idx, after: S.order[idx - 1]?.path || '', status: statusOf(e), name: e.name };
-      S.stack.push(item);
-      S.status.delete(kp(e));
+      const item = takeOut(e, { trash: r });
       S.deleted++;
       S.trashPending++;
       S.trashDirs.add(dirOf(r.trashed));
       saveTrashDirs();
-      S.order.splice(idx, 1);
-      S.cur = Math.min(idx, S.order.length - 1);
-      o.removeFile(e.path);
-      S.undoFlag = true;
       o.toast(t('review.toast.deleted', { name: e.name }), '', [
         { label: t('review.undo_delete'), run: () => run(() => restoreItem(item)) },
       ]);
       refreshTrash();
       persistSoon();
-      let to = findFrom(idx, 1);
-      if (to < 0) to = findFrom(idx - 1, -1);
-      if (to < 0) { S.cur = -1; ed.clearImage(); renderAll(); return; }
-      await show(to, 1);
+      await showNear(item.idx);
     });
+  }
+
+  function approve() {
+    if (!opts.outDir) { next(); return; }
+    run(async () => {
+      const e = current();
+      if (!e || ed.busy()) return;
+      if (!(await settle())) return;
+      let r;
+      try {
+        r = await MoveToOutput(e.path, S.base, opts.outDir);
+      } catch (err) {
+        o.toast(String(err), 'failed');
+        return;
+      }
+      const item = takeOut(e, { move: r, outDir: opts.outDir });
+      S.moved++;
+      o.toast(t('review.toast.moved', { name: e.name }), '', [
+        { label: t('review.undo_move'), run: () => run(() => restoreItem(item)) },
+      ]);
+      persistSoon();
+      await showNear(item.idx);
+    }, true);
+  }
+
+  function takeOut(e, extra) {
+    const idx = S.cur;
+    const item = { ...extra, entry: e, idx, after: S.order[idx - 1]?.path || '', status: statusOf(e), name: e.name };
+    S.stack.push(item);
+    S.status.delete(kp(e));
+    S.order.splice(idx, 1);
+    S.cur = Math.min(idx, S.order.length - 1);
+    o.removeFile(e.path);
+    S.undoFlag = true;
+    return item;
+  }
+
+  async function showNear(idx) {
+    let to = findFrom(idx, 1);
+    if (to < 0) to = findFrom(idx - 1, -1);
+    if (to < 0) { S.cur = -1; ed.clearImage(); renderAll(); return; }
+    await show(to, 1);
   }
 
   async function restoreItem(item) {
     if (!S.stack.includes(item) || ed.busy()) return;
     if (!(await settle())) return;
     try {
-      await RestoreTrashed(item.trash.trashed, item.trash.original);
+      if (item.move) await RestoreMoved(item.move.moved, item.move.original, item.outDir);
+      else await RestoreTrashed(item.trash.trashed, item.trash.original);
     } catch (err) {
       o.toast(String(err), 'failed');
       return;
@@ -359,8 +395,12 @@ export function createReview(o) {
     S.order.splice(at, 0, item.entry);
     o.insertFile(item.entry, item.after);
     if (item.status) S.status.set(kp(item.entry), item.status);
-    S.deleted = Math.max(0, S.deleted - 1);
-    S.trashPending = Math.max(0, S.trashPending - 1);
+    if (item.move) {
+      S.moved = Math.max(0, S.moved - 1);
+    } else {
+      S.deleted = Math.max(0, S.deleted - 1);
+      S.trashPending = Math.max(0, S.trashPending - 1);
+    }
     S.undoFlag = S.stack.length > 0; // more Ctrl+Z steps back through earlier deletions
     refreshTrash();
     o.toast(t('review.toast.restored', { name: item.name }));
@@ -396,7 +436,7 @@ export function createReview(o) {
     if (!dirs.length) return;
     try {
       const n = await EmptyTrashToRecycleBin(dirs);
-      S.stack = []; // restored copies are gone from the trash folders now
+      S.stack = S.stack.filter((x) => x.move); // restored copies are gone from the trash folders now
       S.undoFlag = false;
       S.trashPending = 0;
       o.toast(tn('review.toast.recycled', n, { n: fmtN(n) }));
@@ -520,6 +560,7 @@ export function createReview(o) {
       if (r !== 'ok') return;
       S.status = new Map();
       S.deleted = 0;
+      S.moved = 0;
       try { localStorage.removeItem(STORE_PREFIX + (S.key ?? '*')); } catch { /* ignore */ }
       persistSoon();
       renderAll();
@@ -606,11 +647,29 @@ export function createReview(o) {
   const recycleBtn = el('button', 'btn small');
   recycleBtn.type = 'button';
   recycleBtn.onclick = () => { recycleBtn.blur(); recycle(); };
+  const outBtn = el('button', 'btn small rv-out ellipsis');
+  outBtn.type = 'button';
+  outBtn.onclick = async () => {
+    outBtn.blur();
+    const d = await o.pickOutputDir();
+    if (d) setOutDir(d);
+  };
+  const outClear = el('button', 'btn small ghost');
+  outClear.type = 'button';
+  outClear.onclick = () => { outClear.blur(); setOutDir(''); };
+  function setOutDir(d) {
+    opts.outDir = d;
+    writeJSON(OPTS_KEY, opts);
+    for (const fn of hintParts) fn();
+    renderAll();
+  }
   const controls = el('div', 'rv-controls');
   controls.append(
     check('unreviewed', (on) => { opts.unreviewedOnly = on; writeJSON(OPTS_KEY, opts); renderAll(); prefetchAround(Math.max(S.cur, 0)); }),
     check('keepZoom', (on) => editorPrefs.set('keepZoom', on)),
     check('backup', (on) => o.setBackup(on)),
+    outBtn,
+    outClear,
     el('span', 'spacer'),
     recycleBtn,
   );
@@ -626,13 +685,13 @@ export function createReview(o) {
     });
     const text = el('span');
     h.append(' ', text);
-    hintParts.push(() => { text.textContent = t(textKey); });
+    hintParts.push(() => { text.textContent = t(typeof textKey === 'function' ? textKey() : textKey); });
     hints.append(h);
   }
-  hint(['→', 'Enter'], 'review.hint.next');
+  hint(['→', 'Enter'], () => (opts.outDir ? 'review.hint.next_move' : 'review.hint.next'));
   hint(['←', 'Backspace'], 'review.hint.prev');
   hint(['Delete'], 'review.hint.delete');
-  hint(['Ctrl+Z'], 'review.hint.undo');
+  hint(['Ctrl+Z'], () => (opts.outDir ? 'review.hint.undo_move' : 'review.hint.undo'));
   hint(['Home', 'End'], 'review.hint.ends');
   hint(['Ctrl+G'], 'review.hint.goto');
   bottom.append(filmEl, controls, hints);
@@ -699,8 +758,14 @@ export function createReview(o) {
     else if (opts.unreviewedOnly) posEl.textContent = t('review.position_filtered', { pos: fmtN(S.cur + 1), total: fmtN(total), left: fmtN(total - reviewed) });
     else posEl.textContent = t('review.position', { pos: fmtN(S.cur + 1), total: fmtN(total) });
     barFill.style.width = total ? `${(reviewed / total) * 100}%` : '0';
-    countsEl.textContent = t('review.counts', { reviewed: fmtN(reviewed), edited: fmtN(edited), deleted: fmtN(S.deleted) });
-    resetBtn.disabled = !reviewed && !S.deleted;
+    const counts = { reviewed: fmtN(reviewed), edited: fmtN(edited), moved: fmtN(S.moved), deleted: fmtN(S.deleted) };
+    countsEl.textContent = t(opts.outDir || S.moved ? 'review.counts_moved' : 'review.counts', counts);
+    resetBtn.disabled = !reviewed && !S.deleted && !S.moved;
+    outBtn.textContent = opts.outDir ? t('review.out_dir', { name: opts.outDir.split(/[\\/]/).pop() }) : t('review.out_dir.none');
+    outBtn.title = opts.outDir ? `${opts.outDir}\n${t('review.out_dir.title')}` : t('review.out_dir.title');
+    outClear.hidden = !opts.outDir;
+    outClear.textContent = t('review.out_dir.clear');
+    outClear.title = t('review.out_dir.clear.title');
 
     emptyTitle.textContent = total ? '' : t('review.empty.title');
     emptyHint.textContent = total ? '' : t('review.empty.hint');
@@ -714,7 +779,7 @@ export function createReview(o) {
   }
 
   return {
-    enter, leave, next, prev, first, last, promptGoto, trashCurrent, undoDelete, openFolder, drop, syncOptions,
+    enter, leave, next: approve, prev, first, last, promptGoto, trashCurrent, undoDelete, openFolder, drop, syncOptions,
     relocalize() { film.reset(); renderAll(); },
     // For verification from the dev console.
     stats() {
@@ -725,6 +790,6 @@ export function createReview(o) {
       return { n: all.length, avg: avg(all), p95: p95(all), warmN: warm.length, warmAvg: avg(warm), warmP95: p95(warm) };
     },
     resetStats() { S.stats = []; },
-    state: () => ({ cur: S.cur, total: S.order.length, deleted: S.deleted, key: S.key, vis: S.vis.length, filmRendered: film.rendered(), stack: S.stack.length, trash: S.trashInfo }),
+    state: () => ({ cur: S.cur, total: S.order.length, deleted: S.deleted, moved: S.moved, outDir: opts.outDir, key: S.key, vis: S.vis.length, filmRendered: film.rendered(), stack: S.stack.length, trash: S.trashInfo }),
   };
 }

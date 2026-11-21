@@ -78,16 +78,17 @@ Open the `Review` tab (or press `Ctrl+3`) to go through **thousands** of images 
 
 | Key | Action |
 |---|---|
-| `→` `Enter` `PageDown` | Mark as OK and go to the next image. A modified image is saved first (the backup setting applies); if saving fails you stay on it |
+| `→` `Enter` `PageDown` | Mark as OK and go to the next image. A modified image is saved first (the backup setting applies); if saving fails you stay on it. With an output folder set, the image is moved there instead |
 | `←` `Backspace` `PageUp` | Previous image (status unchanged) |
 | `Delete` | Move the file to the trash folder and show the next image. With a selection or floating layer it clears the selected pixels as usual |
 | `Shift+Delete` | Always delete the file, even with a selection |
-| `Ctrl+Z` | Undo the last deletion (when nothing was edited since); otherwise a normal pixel undo. The notice also has an `Undo delete` button |
+| `Ctrl+Z` | Undo the last deletion or move (when nothing was edited since); otherwise a normal pixel undo. The notice also has an `Undo delete` / `Undo move` button |
 | `Home` `End` `Ctrl+G` | First · last image · go to an image number |
 | `Ctrl+O` | Open a folder |
 
 With a selection the arrow keys still nudge it, and the tool keys (`B E G I L U M W V X [ ]`) keep working. `Unreviewed only` skips what you have already reviewed.
 
+- **Output folder.** Pick one with `Output folder…` in the bar to empty the source folder as you go: every image you mark OK is moved there (after saving any edits), keeping its subfolder path relative to the reviewed folder, and deleted images go to the trash as usual. In the end the source folder only holds the images you have not reviewed yet. A name that already exists in the output folder gets `-1`, `-2`, ... appended, so nothing is overwritten; moving to another drive copies the file and then removes the original. `Clear` goes back to marking images without moving them.
 - **Deleting is safe.** A deleted file is moved to a hidden `.sprite-tools-trash` folder next to it (instant, reversible, skipped by scans); the app never deletes anything permanently. When you leave Review you are asked whether to move the trash to the Windows Recycle Bin (`Move to Recycle Bin` / `Keep for now` / `Show`), and the `Recycle deleted (N)` button in the bar does the same at any time. If Windows cannot recycle a file it asks before destroying it.
 - **Backups.** When `Back up before overwriting` is checked (it is visible in the bar), saving an edited image over the original makes a backup each time. Editing thousands of images therefore creates thousands of backups in `.sprite-tools-backup` folders; uncheck it if you do not need them.
 - **Progress is remembered** per folder (the common folder of the files) in the app's local storage: which images were reviewed or edited, the deleted count and the position. Reopening the same folder resumes at the last position automatically (the notice has `Start over`); `Reset progress` forgets it.

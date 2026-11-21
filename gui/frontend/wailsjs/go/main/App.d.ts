@@ -23,6 +23,8 @@ export function LoadImageRGBA(arg1:string):Promise<main.EditorImage>;
 
 export function LoadPalette(arg1:string):Promise<main.PaletteInfo>;
 
+export function MoveToOutput(arg1:string,arg2:string,arg3:string):Promise<main.MoveResult>;
+
 export function PaletteExists(arg1:string):Promise<boolean>;
 
 export function PalettesDir():Promise<string>;
@@ -40,6 +42,8 @@ export function PreviewPack(arg1:main.JobRequest,arg2:Array<string>):Promise<mai
 export function ProcessPixels(arg1:main.JobRequest,arg2:number,arg3:number,arg4:string):Promise<main.ProcessResult>;
 
 export function RestoreBackups(arg1:Array<main.BackupPair>):Promise<main.RestoreReport>;
+
+export function RestoreMoved(arg1:string,arg2:string,arg3:string):Promise<void>;
 
 export function RestoreTrashed(arg1:string,arg2:string):Promise<void>;
 

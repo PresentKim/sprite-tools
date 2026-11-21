@@ -42,6 +42,10 @@ export function LoadPalette(arg1) {
   return window['go']['main']['App']['LoadPalette'](arg1);
 }
 
+export function MoveToOutput(arg1, arg2, arg3) {
+  return window['go']['main']['App']['MoveToOutput'](arg1, arg2, arg3);
+}
+
 export function PaletteExists(arg1) {
   return window['go']['main']['App']['PaletteExists'](arg1);
 }
@@ -76,6 +80,10 @@ export function ProcessPixels(arg1, arg2, arg3, arg4) {
 
 export function RestoreBackups(arg1) {
   return window['go']['main']['App']['RestoreBackups'](arg1);
+}
+
+export function RestoreMoved(arg1, arg2, arg3) {
+  return window['go']['main']['App']['RestoreMoved'](arg1, arg2, arg3);
 }
 
 export function RestoreTrashed(arg1, arg2) {

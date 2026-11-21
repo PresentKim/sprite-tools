@@ -145,6 +145,20 @@ export namespace main {
 	        this.diagonal = source["diagonal"];
 	    }
 	}
+	export class MoveResult {
+	    original: string;
+	    moved: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new MoveResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.original = source["original"];
+	        this.moved = source["moved"];
+	    }
+	}
 	export class PackResult {
 	    canceled: boolean;
 	    output: string;
